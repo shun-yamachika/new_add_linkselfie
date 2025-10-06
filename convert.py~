@@ -1,0 +1,37 @@
+# convert_pickle_to_json.py
+import sys, json, pickle, numpy as np, pandas as pd
+from pathlib import Path
+
+def json_safe(o):
+    if isinstance(o, (str, int, float, bool)) or o is None:
+        return o
+    if isinstance(o, (list, tuple, set)):
+        return [json_safe(x) for x in o]
+    if isinstance(o, dict):
+        return {str(k): json_safe(v) for k,v in o.items()}
+    if isinstance(o, pd.DataFrame):
+        return [json_safe(r) for r in o.to_dict(orient="records")]
+    if isinstance(o, pd.Series):
+        return json_safe(o.to_dict())
+    if isinstance(o, np.ndarray):
+        return json_safe(o.tolist())
+    if isinstance(o, (np.integer,)):
+        return int(o)
+    if isinstance(o, (np.floating,)):
+        return float(o)
+    if isinstance(o, (np.bool_,)):
+        return bool(o)
+    return repr(o)
+
+def main(src, dst):
+    with open(src, "rb") as f:
+        obj = pickle.load(f)
+    safe = json_safe(obj)
+    with open(dst, "w", encoding="utf-8") as f:
+        json.dump(safe, f, ensure_ascii=False, indent=2)
+
+if __name__ == "__main__":
+    if len(sys.argv) < 3:
+        print("Usage: python convert_pickle_to_json.py <src.pkl> <dst.json>")
+        sys.exit(1)
+    main(sys.argv[1], sys.argv[2])

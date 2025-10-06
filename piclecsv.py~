@@ -1,0 +1,29 @@
+cd ~/quantum/add_linkselfie/outputs
+python - <<'PY'
+import pickle, pprint
+path = "plot_minwidthsum_perpair_weighted_vs_budget_Depolar.pickle"
+with open(path,"rb") as f: obj = pickle.load(f)
+
+budgets = obj.get("budget_list", [])
+results = obj.get("results", {})
+print("budgets:", budgets[:10], "... (len =", len(budgets),")")
+print("results keys sample:", list(results.keys())[:5])
+
+for b in (min(budgets), budgets[len(budgets)//2], max(budgets)):
+    r = results.get(b)
+    if r is None: continue
+    print(f"\n=== Budget {b} ===")
+    for k in ("minwidthsum_weighted","widthsum_alllinks","per_pair_details"):
+        if k in r:
+            v = r[k]
+            print(f"{k}: type={type(v)}",
+                  ("len="+str(len(v)) if hasattr(v, '__len__') else ""))
+    det = r.get("per_pair_details", [])
+    if det:
+        d0 = det[0]
+        print("per_pair_details[0] keys:", list(d0.keys()))
+        if "min_width_per_pair" in d0:
+            print("min_width_per_pair:", d0["min_width_per_pair"])
+        if "alloc_by_path" in d0:
+            print("alloc_by_path (sample):", list(d0["alloc_by_path"].items())[:3])
+PY

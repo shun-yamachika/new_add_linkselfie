@@ -1,0 +1,35 @@
+schedulerの入出力
+
+入力
+def naive_budget_scheduler(
+    node_path_list,      # 例: [2, 2, 2]  … 各ペアのリンク(パス)本数
+    importance_list,     # 例: [0.3, 0.5, 0.7] … 各ペアの重み（長さは node_path_list と同じ）
+    bounces,             # 例: [1,2,3,4]（重複なし）… 1サンプルの重み（sum(bounces) が単価）
+    C_total,             # 総予算（整数推奨。超過しないよう切り捨て配分）
+    network_generator,   # callable: (path_num, pair_idx) -> network
+):
+
+
+
+置き場所：scheduler を叩く関数は evaluation.py。main はそれを呼ぶだけ（linkselfie流）。
+network_generator：evaluation の中で noise_model を閉じ込める factory を定義（既存パターンと一致）。
+
+
+出力
+per_pair_results: 入力の順（= node_path_list の順）で並べたタプルのリスト
+各要素は (correctness, cost, best_path_fidelity)
+
+total_cost: すべてのペアの cost 合計（予算チェックに便利）
+
+
+
+main -> evalation -> schedular -> algorithms
+という呼び出しになっている
+
+
+
+lnaive = 隣接ノードに配る測定予算が等しい。ノード間で等しくリンクに測
+定資源を配る。
+
+
+

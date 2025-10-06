@@ -1,0 +1,37 @@
+# schedulers/__init__.py
+
+from .scheduler_naive import naive_budget_scheduler  # noqa: F401
+
+__all__ = [
+    "naive_budget_scheduler",
+    "run_scheduler",
+]
+
+
+def run_scheduler(
+    node_path_list,
+    importance_list,
+    scheduler_name,
+    bounces,
+    C_total,
+    network_generator,
+):
+    """
+    スケジューラ名で分岐して実行するディスパッチ関数。
+    戻り値は (per_pair_results, total_cost) を期待（各スケジューラ共通化）。
+    """
+    if scheduler_name == "NaiveBudget":
+        return naive_budget_scheduler(
+            node_path_list=node_path_list,
+            importance_list=importance_list,
+            bounces=bounces,
+            C_total=C_total,
+            network_generator=network_generator,
+        )
+
+    # 将来追加例：
+    # elif scheduler_name == "WeightedBudget":
+    #     from .scheduler_weighted import weighted_budget_scheduler
+    #     return weighted_budget_scheduler(...)
+
+    raise ValueError(f"Unknown scheduler name: {scheduler_name}")

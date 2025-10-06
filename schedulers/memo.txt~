@@ -1,0 +1,11 @@
+
+
+
+
+neighbor_info_dict,
+    network_generator,
+    fidelity_generator,
+    bounces,
+    C_total,
+    C_initial_per_pair=0 # インターフェース互換性のため
+):

@@ -1,0 +1,45 @@
+def _online_network_benchmarking_truly_strict(network, path_list, bounces, C_budget):
+    candidate_set = list(path_list)
+    s = 0
+    C_const = 0.01
+    delta = 0.1
+    cost = 0
+    estimated_fidelities = {}
+    
+
+    cost_per_sample_unit = sum(bounces)
+    if cost_per_sample_unit == 0:
+        cost_per_sample_unit = 1
+
+    while cost < C_budget and len(candidate_set) > 1:
+        s += 1
+        Ns = math.ceil(C_const * 2**(2 * s) * math.log2(2**s * len(candidate_set) / delta))
+        if Ns < 4:
+            Ns = 4
+        
+        cost_needed_for_one_path = Ns * cost_per_sample_unit
+        if cost + cost_needed_for_one_path > C_budget and s > 1:
+             break
+
+        p_s = {}
+        sample_times = {i: Ns for i in bounces}
+        for path in candidate_set:
+            if cost + cost_needed_for_one_path > C_budget:
+                continue
+            p, bounces_num = network.benchmark_path(path, bounces, sample_times)
+            cost += bounces_num
+            estimated_fidelity = p + (1 - p) / 2
+            estimated_fidelities[path] = estimated_fidelity
+            p_s[path] = p
+        if not p_s:
+            break
+        p_max = max(p_s.values())
+        new_candidate_set = [path for path in candidate_set if path in p_s and p_s[path] + 2**(-s) > p_max - 2**(-s)]
+        candidate_set = new_candidate_set
+        
+    if not estimated_fidelities:
+
+    best_path = max(estimated_fidelities, key=estimated_fidelities.get)
+    best_path_fidelity = estimated_fidelities[best_path]
+    correctness = (best_path == network.best_path)
+
