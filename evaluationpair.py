@@ -32,7 +32,7 @@ import matplotlib as mpl
 from cycler import cycler
 
 # Reuse core components from your existing codebase
-from evaluation import QuantumNetwork  # existing class
+from network import QuantumNetwork  # existing class
 from schedulers import run_scheduler    # existing dispatcher
 from viz.plots import mean_ci95         # existing helper
 

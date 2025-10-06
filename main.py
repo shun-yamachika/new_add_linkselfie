@@ -1,16 +1,11 @@
 # main.py — Run experiments: budget, random-gap, fixed-gap, and #pairs
 import os
 import random
-
 import numpy as np
 
-from evaluation import plot_accuracy_vs_budget
-from evaluationgap import (
-    plot_accuracy_vs_gap,          # random jittered (alpha - beta = gap)
-    plot_accuracy_vs_gap_fixgap,   # fixed arithmetic sequence (max -> step -gap)
-)
+from evaluation import plot_accuracy_vs_budget, plot_value_vs_used
+from evaluationgap import plot_accuracy_vs_gap, plot_accuracy_vs_gap_fixgap
 from evaluationpair import plot_accuracy_vs_pairs
-
 
 # =====================
 # Simple configuration
@@ -26,39 +21,43 @@ SEED        = 12
 NOISE_MODEL = "Depolar"
 BOUNCES     = (1, 2, 3, 4)
 REPEAT      = 10
-SCHEDULERS  = ['LNaive', 'Greedy']
+SCHEDULERS  = ["LNaive", "Greedy"]
 
 # Importance settings
-IMPORTANCE_MODE    = "fixed"      # "fixed" or "uniform"
-IMPORTANCE_UNIFORM = (0.0, 1.0)   # only used if IMPORTANCE_MODE == "uniform"
+# NOTE: "uniform" のときは *_IMPORTANCES は使われず、各リピートで U[a,b] から再サンプルされます
+IMPORTANCE_MODE    = "uniform"          # "fixed" or "uniform"
+IMPORTANCE_UNIFORM = (0.0, 1.0)         # used only if IMPORTANCE_MODE == "uniform"
 
 # -----------------
 # 1) Budget sweep
 # -----------------
-BUDGET_LIST    = [3000, 4000, 5000, 6000, 7000, 8000]
-NODE_PATH_LIST = [5, 5, 5]                 # candidate-link counts per destination pair
-IMPORTANCE_LIST = [1.0, 1.0, 1.0]          # used when IMPORTANCE_MODE == "fixed"
+BUDGET_LIST         = [3000, 4000, 5000, 6000, 7000, 8000]
+BUDGET_NODE_PATHS   = [4,4,4,4,4]         
+BUDGET_IMPORTANCES  = [0.3, 0.6, 0.9]   # Budget専用: IMPORTANCE_MODE == "fixed" のときのみ使用
 
 # --------------
 # 2) Gap sweeps
 # --------------
 # (a) Random (alpha - beta = gap) version
-GAP_LIST_RANDOM = [0.005, 0.01, 0.02, 0.03]
-ALPHA_BASE      = 0.95
-VARIANCE        = 0.10
-C_GAP_TOTAL     = 5000  # total budget per gap point
+GAP_LIST_RANDOM        = [0.025, 0.05, 0.075, 0.10, 0.125, 0.150]
+ALPHA_BASE             = 0.95
+VARIANCE               = 0.025
+C_GAP_TOTAL            = 5000           # total budget per gap point
+GAP_RANDOM_NODE_PATHS  = [4,4,4,4,4]  
+GAP_RANDOM_IMPORTANCES = [0.3, 0.6, 0.9, 0.6, 0.3]  # fixed時のみ使用（長さ=ペア数に合わせる）
 
 # (b) Fixed arithmetic-sequence version
-GAP_LIST_FIX = [0.005, 0.01, 0.02, 0.03]
-FIDELITY_MAX = 1.0      # sequence starts at this max and steps down by 'gap'
+GAP_LIST_FIX        = [0.005, 0.01, 0.02, 0.03]
+FIDELITY_MAX        = 1.0              # sequence starts at this max and steps down by 'gap'
+GAP_FIX_NODE_PATHS  = [4,4,4,4,4]  
+GAP_FIX_IMPORTANCES = [0.3, 0.6, 0.9, 0.6, 0.3]    # fixed時のみ使用
 
 # --------------------
 # 3) #Pairs (N) sweep
 # --------------------
-PAIRS_LIST      = [1, 2, 3, 4, 5, 6]       # number of destination pairs
-PATHS_PER_PAIR  = 5                         # candidate links per pair
-C_PAIRS_TOTAL   = 6000                      # total budget per N
-
+PAIRS_LIST      = [3, 4, 5, 6, 7, 8]   # number of destination pairs
+PATHS_PER_PAIR  = 4                    # candidate links per pair
+C_PAIRS_TOTAL   = 10000                # total budget per N
 
 def set_random_seed(seed: int = 12):
     random.seed(seed)
@@ -72,7 +71,6 @@ def set_random_seed(seed: int = 12):
     except Exception:
         pass
 
-
 def main():
     set_random_seed(SEED)
     os.makedirs("outputs", exist_ok=True)
@@ -83,8 +81,22 @@ def main():
             budget_list=BUDGET_LIST,
             scheduler_names=SCHEDULERS,
             noise_model=NOISE_MODEL,
-            node_path_list=NODE_PATH_LIST,
-            importance_list=IMPORTANCE_LIST,
+            node_path_list=BUDGET_NODE_PATHS,
+            importance_list=BUDGET_IMPORTANCES,
+            bounces=BOUNCES,
+            repeat=REPEAT,
+            importance_mode=IMPORTANCE_MODE,
+            importance_uniform=IMPORTANCE_UNIFORM,
+            seed=SEED,
+            verbose=True,
+        )
+        # 価値関数プロット（必要ならコメント解除）
+        plot_value_vs_used(
+            budget_list=BUDGET_LIST,
+            scheduler_names=SCHEDULERS,
+            noise_model=NOISE_MODEL,
+            node_path_list=BUDGET_NODE_PATHS,
+            importance_list=BUDGET_IMPORTANCES,
             bounces=BOUNCES,
             repeat=REPEAT,
             importance_mode=IMPORTANCE_MODE,
@@ -99,8 +111,8 @@ def main():
             gap_list=GAP_LIST_RANDOM,
             scheduler_names=SCHEDULERS,
             noise_model=NOISE_MODEL,
-            node_path_list=NODE_PATH_LIST,
-            importance_list=IMPORTANCE_LIST,
+            node_path_list=GAP_RANDOM_NODE_PATHS,
+            importance_list=GAP_RANDOM_IMPORTANCES,
             bounces=BOUNCES,
             repeat=REPEAT,
             importance_mode=IMPORTANCE_MODE,
@@ -118,8 +130,8 @@ def main():
             gap_list=GAP_LIST_FIX,
             scheduler_names=SCHEDULERS,
             noise_model=NOISE_MODEL,
-            node_path_list=NODE_PATH_LIST,
-            importance_list=IMPORTANCE_LIST,
+            node_path_list=GAP_FIX_NODE_PATHS,
+            importance_list=GAP_FIX_IMPORTANCES,
             bounces=BOUNCES,
             repeat=REPEAT,
             importance_mode=IMPORTANCE_MODE,
@@ -145,7 +157,6 @@ def main():
             seed=SEED,
             verbose=True,
         )
-
 
 if __name__ == "__main__":
     main()
