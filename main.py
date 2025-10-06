@@ -1,26 +1,68 @@
-# main.py — ほぼ従来どおり。seed だけ CLI から渡せる最小変更版
-
+# main.py — Run experiments: budget, random-gap, fixed-gap, and #pairs
 import os
 import random
-import argparse
-from multiprocessing.pool import Pool
 
-from evaluation import (
-    plot_accuracy_vs_budget,
-    plot_value_vs_used,
-    plot_value_vs_budget_target,
-    plot_widthsum_alllinks_vs_budget,
-    plot_minwidthsum_perpair_vs_budget,
-    plot_widthsum_alllinks_weighted_vs_budget,
-    plot_minwidthsum_perpair_weighted_vs_budget,
-    plot_importance_discovery_value_vs_budget,
+import numpy as np
+
+from evaluation import plot_accuracy_vs_budget
+from evaluationgap import (
+    plot_accuracy_vs_gap,          # random jittered (alpha - beta = gap)
+    plot_accuracy_vs_gap_fixgap,   # fixed arithmetic sequence (max -> step -gap)
 )
+from evaluationpair import plot_accuracy_vs_pairs
 
-# ---- 乱数初期化（標準/NumPy/NetSquid） ----
+
+# =====================
+# Simple configuration
+# =====================
+# Toggle which experiments to run
+RUN_BUDGET     = True
+RUN_GAP_RANDOM = True   # existing: alpha - beta = gap (randomized fidelities)
+RUN_GAP_FIX    = True   # NEW: fixed arithmetic sequence fidelities
+RUN_PAIRS      = True
+
+# Global seed + common settings
+SEED        = 12
+NOISE_MODEL = "Depolar"
+BOUNCES     = (1, 2, 3, 4)
+REPEAT      = 10
+SCHEDULERS  = ['LNaive', 'Greedy']
+
+# Importance settings
+IMPORTANCE_MODE    = "fixed"      # "fixed" or "uniform"
+IMPORTANCE_UNIFORM = (0.0, 1.0)   # only used if IMPORTANCE_MODE == "uniform"
+
+# -----------------
+# 1) Budget sweep
+# -----------------
+BUDGET_LIST    = [3000, 4000, 5000, 6000, 7000, 8000]
+NODE_PATH_LIST = [5, 5, 5]                 # candidate-link counts per destination pair
+IMPORTANCE_LIST = [1.0, 1.0, 1.0]          # used when IMPORTANCE_MODE == "fixed"
+
+# --------------
+# 2) Gap sweeps
+# --------------
+# (a) Random (alpha - beta = gap) version
+GAP_LIST_RANDOM = [0.005, 0.01, 0.02, 0.03]
+ALPHA_BASE      = 0.95
+VARIANCE        = 0.10
+C_GAP_TOTAL     = 5000  # total budget per gap point
+
+# (b) Fixed arithmetic-sequence version
+GAP_LIST_FIX = [0.005, 0.01, 0.02, 0.03]
+FIDELITY_MAX = 1.0      # sequence starts at this max and steps down by 'gap'
+
+# --------------------
+# 3) #Pairs (N) sweep
+# --------------------
+PAIRS_LIST      = [1, 2, 3, 4, 5, 6]       # number of destination pairs
+PATHS_PER_PAIR  = 5                         # candidate links per pair
+C_PAIRS_TOTAL   = 6000                      # total budget per N
+
+
 def set_random_seed(seed: int = 12):
     random.seed(seed)
     try:
-        import numpy as np
         np.random.seed(seed)
     except Exception:
         pass
@@ -30,86 +72,80 @@ def set_random_seed(seed: int = 12):
     except Exception:
         pass
 
+
 def main():
-    # ★ 変更点は seed だけ（デフォルト12、--seed で上書き可能）
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--seed", type=int, default=12, help="random seed")
-    args = ap.parse_args()
-
-    set_random_seed(args.seed)
-
-    # 従来どおりの固定設定（必要ならここを好きに書き換えてね）
-    noise_model = "Depolar"
-    budget_list = [3000, 4000, 5000, 6000, 7000, 8000]
-    node_path_list = [5, 5, 5]
-    importance_list = [0.3,0.6,0.9]
-    importance_mode = "uniform"          # "fix" or "uniform"
-    importance_uniform = (0.0, 1.0)    # when importance_mode == "uniform"
-    bounces = [1, 2, 3, 4]
-    repeat = 25
-    delta = 0.01
-    scheduler_names = ["Greedy", "LNaive"]
-
-    print("==== Config ====")
-    print(f"noise_model={noise_model}")
-    print(f"budget_list={budget_list}")
-    print(f"node_path_list={node_path_list}")
-    print(f"importance_mode={importance_mode}, importance_uniform={importance_uniform}")
-    print(f"importance_list={importance_list}")
-    print(f"bounces={bounces}, repeat={repeat}")
-    print(f"seed={args.seed}")
-    print("================\n")
-
+    set_random_seed(SEED)
     os.makedirs("outputs", exist_ok=True)
 
-    # 従来通り Pool を使って並列実行
-    jobs = []
-    with Pool() as p:
-        jobs.append(p.apply_async(
-            plot_accuracy_vs_budget,
-            args=(budget_list, scheduler_names, noise_model, node_path_list, importance_list, bounces, repeat),
-            kwds={"importance_mode": importance_mode, "importance_uniform": importance_uniform, "seed": args.seed, "verbose": True}
-        ))
-        jobs.append(p.apply_async(
-            plot_value_vs_used,
-            args=(budget_list, scheduler_names, noise_model, node_path_list, importance_list, bounces, repeat),
-            kwds={"importance_mode": importance_mode, "importance_uniform": importance_uniform, "seed": args.seed, "verbose": True}
-        ))
-        jobs.append(p.apply_async(
-            plot_value_vs_budget_target,
-            args=(budget_list, scheduler_names, noise_model, node_path_list, importance_list, bounces, repeat),
-            kwds={"importance_mode": importance_mode, "importance_uniform": importance_uniform, "seed": args.seed, "verbose": True}
-        ))
-        jobs.append(p.apply_async(
-            plot_widthsum_alllinks_vs_budget,
-            args=(budget_list, scheduler_names, noise_model, node_path_list, importance_list, bounces, repeat),
-            kwds={"delta": delta, "importance_mode": importance_mode, "importance_uniform": importance_uniform, "seed": args.seed, "verbose": True}
-        ))
-        jobs.append(p.apply_async(
-            plot_minwidthsum_perpair_vs_budget,
-            args=(budget_list, scheduler_names, noise_model, node_path_list, importance_list, bounces, repeat),
-            kwds={"delta": delta, "importance_mode": importance_mode, "importance_uniform": importance_uniform, "seed": args.seed, "verbose": True}
-        ))
-        jobs.append(p.apply_async(
-            plot_widthsum_alllinks_weighted_vs_budget,
-            args=(budget_list, scheduler_names, noise_model, node_path_list, importance_list, bounces, repeat),
-            kwds={"delta": delta, "importance_mode": importance_mode, "importance_uniform": importance_uniform, "seed": args.seed, "verbose": True}
-        ))
-        jobs.append(p.apply_async(
-            plot_minwidthsum_perpair_weighted_vs_budget,
-            args=(budget_list, scheduler_names, noise_model, node_path_list, importance_list, bounces, repeat),
-            kwds={"delta": delta, "importance_mode": importance_mode, "importance_uniform": importance_uniform, "seed": args.seed, "verbose": True}
-        ))
-        jobs.append(p.apply_async(
-            plot_importance_discovery_value_vs_budget,
-            args=(budget_list, scheduler_names, noise_model, node_path_list, importance_list, bounces, repeat),
-            kwds={"y": 0.10, "delta": delta, "use_f": "Fhat",
-                  "importance_mode": importance_mode, "importance_uniform": importance_uniform,
-                  "seed": args.seed, "verbose": True}
-        ))
+    # (1) Budget vs Accuracy
+    if RUN_BUDGET:
+        plot_accuracy_vs_budget(
+            budget_list=BUDGET_LIST,
+            scheduler_names=SCHEDULERS,
+            noise_model=NOISE_MODEL,
+            node_path_list=NODE_PATH_LIST,
+            importance_list=IMPORTANCE_LIST,
+            bounces=BOUNCES,
+            repeat=REPEAT,
+            importance_mode=IMPORTANCE_MODE,
+            importance_uniform=IMPORTANCE_UNIFORM,
+            seed=SEED,
+            verbose=True,
+        )
 
-        for j in jobs:
-            j.get()
+    # (2a) Gap vs Accuracy (randomized: alpha - beta = gap)
+    if RUN_GAP_RANDOM:
+        plot_accuracy_vs_gap(
+            gap_list=GAP_LIST_RANDOM,
+            scheduler_names=SCHEDULERS,
+            noise_model=NOISE_MODEL,
+            node_path_list=NODE_PATH_LIST,
+            importance_list=IMPORTANCE_LIST,
+            bounces=BOUNCES,
+            repeat=REPEAT,
+            importance_mode=IMPORTANCE_MODE,
+            importance_uniform=IMPORTANCE_UNIFORM,
+            seed=SEED,
+            alpha_base=ALPHA_BASE,
+            variance=VARIANCE,
+            C_total_override=C_GAP_TOTAL,
+            verbose=True,
+        )
+
+    # (2b) Gap vs Accuracy (fixed arithmetic sequence)
+    if RUN_GAP_FIX:
+        plot_accuracy_vs_gap_fixgap(
+            gap_list=GAP_LIST_FIX,
+            scheduler_names=SCHEDULERS,
+            noise_model=NOISE_MODEL,
+            node_path_list=NODE_PATH_LIST,
+            importance_list=IMPORTANCE_LIST,
+            bounces=BOUNCES,
+            repeat=REPEAT,
+            importance_mode=IMPORTANCE_MODE,
+            importance_uniform=IMPORTANCE_UNIFORM,
+            seed=SEED,                 # used only if IMPORTANCE_MODE == "uniform"
+            fidelity_max=FIDELITY_MAX, # sequence head value
+            C_total_override=C_GAP_TOTAL,
+            verbose=True,
+        )
+
+    # (3) #Pairs vs Accuracy
+    if RUN_PAIRS:
+        plot_accuracy_vs_pairs(
+            pairs_list=PAIRS_LIST,
+            paths_per_pair=PATHS_PER_PAIR,
+            C_total=C_PAIRS_TOTAL,
+            scheduler_names=SCHEDULERS,
+            noise_model=NOISE_MODEL,
+            bounces=BOUNCES,
+            repeat=REPEAT,
+            importance_mode=IMPORTANCE_MODE,
+            importance_uniform=IMPORTANCE_UNIFORM,
+            seed=SEED,
+            verbose=True,
+        )
+
 
 if __name__ == "__main__":
     main()

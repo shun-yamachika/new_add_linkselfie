@@ -1,0 +1,613 @@
+
+# evaluationgap.py — Sweep x-axis over "gap", y-axis = accuracy (mean ± 95% CI)
+# Random fidelity generator version where alpha - beta = gap.
+import os
+import json
+import time
+import pickle
+import hashlib
+import shutil
+
+import numpy as np
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+from cycler import cycler
+from network import QuantumNetwork
+from schedulers import run_scheduler
+from viz.plots import mean_ci95
+
+# ---- Matplotlib global style (match evaluation.py) ----
+mpl.rcParams["figure.constrained_layout.use"] = True
+mpl.rcParams["savefig.bbox"] = "tight"
+mpl.rcParams["font.family"] = "serif"
+mpl.rcParams["font.serif"] = [
+    "TeX Gyre Termes",
+    "Nimbus Roman",
+    "Liberation Serif",
+    "DejaVu Serif",
+]
+mpl.rcParams["font.size"] = 20
+
+default_cycler = (
+    cycler(color=["#4daf4a", "#377eb8", "#e41a1c", "#984ea3", "#ff7f00", "#a65628"])
+    + cycler(marker=["s", "v", "o", "x", "*", "+"])
+    + cycler(linestyle=[":", "--", "-", "-.", "--", ":"])
+)
+plt.rc("axes", prop_cycle=default_cycler)
+
+
+# -----------------------------
+# Random fidelity generators (alpha - beta = gap)
+# -----------------------------
+def _generate_fidelity_list_random_rng(rng, path_num, alpha=0.95, beta=0.85, variance=0.1):
+    """
+    Generate `path_num` fidelities with top-1 mean alpha and others mean beta,
+    each sampled from Normal(mu, variance), clamped to [0.8, 1.0].
+    Ensures a visible top-1 gap (>0.02) in the sorted list.
+    """
+    while True:
+        mean = [alpha] + [beta] * (path_num - 1)
+        res = []
+        for mu in mean:
+            # Rejection sample into [0.8, 1.0]
+            while True:
+                r = rng.normal(mu, variance)
+                if 0.8 <= r <= 1.0:
+                    break
+            res.append(float(r))
+        sorted_res = sorted(res, reverse=True)
+        if len(sorted_res) >= 2 and (sorted_res[0] - sorted_res[1]) > 0.02:
+            return res
+
+
+def _fidelity_list_gap_random(path_num, gap, rng,
+                              alpha_base=0.95, variance=0.1):
+    """
+    Build a fidelity list of length `path_num` using:
+      alpha = alpha_base
+      beta  = alpha - gap
+    With random jitter via Normal(mu, variance), clamped to [0.8, 1.0].
+    """
+    alpha = float(alpha_base)
+    beta  = float(alpha_base - gap)
+    # keep beta within [0.8, alpha)
+    beta = min(max(beta, 0.8), max(alpha - 1e-6, 0.8))
+    return _generate_fidelity_list_random_rng(rng, path_num, alpha=alpha, beta=beta, variance=variance)
+
+def generate_fidelity_list_fix_gap(path_num, gap, fidelity_max=1):
+    result = []
+    fidelity = fidelity_max
+    for _ in range(path_num):
+        result.append(fidelity)
+        fidelity -= gap
+    assert len(result) == path_num
+    return result
+
+# -----------------------------
+# Cache helpers (gap sweep)
+# -----------------------------
+def _gap_sweep_signature(gap_list, scheduler_names, noise_model,
+                         node_path_list, importance_list, bounces, repeat,
+                         importance_mode="fixed", importance_uniform=(0.0, 1.0), seed=None,
+                         alpha_base=0.95, variance=0.10):
+    payload = {
+        "gap_list": list(map(float, gap_list)),
+        "scheduler_names": list(scheduler_names),
+        "noise_model": str(noise_model),
+        "node_path_list": list(node_path_list),
+        "importance_list": list(importance_list) if importance_list is not None else None,
+        "importance_mode": str(importance_mode),
+        "importance_uniform": list(importance_uniform) if importance_uniform is not None else None,
+        "bounces": list(bounces),
+        "repeat": int(repeat),
+        "seed": int(seed) if seed is not None else None,
+        # fidelity-generation mode & params
+        "fidelity_mode": "random_gap_alpha_beta",
+        "alpha_base": float(alpha_base),
+        "variance": float(variance),
+        "version": 2,
+    }
+    sig = hashlib.md5(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:10]
+    return payload, sig
+
+
+def _shared_gap_path(noise_model, sig):
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    outdir = os.path.join(root_dir, "outputs")
+    os.makedirs(outdir, exist_ok=True)
+    return os.path.join(outdir, f"shared_gap_{noise_model}_{sig}.pickle")
+
+
+def _run_or_load_shared_gap_sweep(
+    gap_list, scheduler_names, noise_model,
+    node_path_list, importance_list,
+    bounces=(1, 2, 3, 4), repeat=10,
+    importance_mode="fixed", importance_uniform=(0.0, 1.0),
+    seed=None, alpha_base=0.95, variance=0.10,
+    C_total=5000,
+    verbose=True, print_every=1,
+):
+    """
+    For each gap in gap_list, run `repeat` times over the same topology generator (per-repeat),
+    and evaluate every scheduler. Cache the whole sweep with a single file lock.
+    """
+    config, sig = _gap_sweep_signature(
+        gap_list, scheduler_names, noise_model,
+        node_path_list, importance_list, bounces, repeat,
+        importance_mode=importance_mode, importance_uniform=importance_uniform, seed=seed,
+        alpha_base=alpha_base, variance=variance,
+    )
+    cache_path = _shared_gap_path(noise_model, sig)
+    lock_path = cache_path + ".lock"
+    STALE_LOCK_SECS = 6 * 60 * 60
+    HEARTBEAT_EVERY = 5.0
+
+    rng = np.random.default_rng(seed)
+
+    # Fast path: cached
+    if os.path.exists(cache_path):
+        with open(cache_path, "rb") as f:
+            return pickle.load(f)
+
+    # Lock acquisition loop
+    got_lock = False
+    while True:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            got_lock = True
+            break
+        except FileExistsError:
+            # If cache appeared while waiting, load immediately.
+            if os.path.exists(cache_path):
+                with open(cache_path, "rb") as f:
+                    return pickle.load(f)
+            try:
+                age = time.time() - os.path.getmtime(lock_path)
+            except OSError:
+                age = 0
+            if age > STALE_LOCK_SECS:
+                try:
+                    os.remove(lock_path)
+                except FileNotFoundError:
+                    pass
+                continue
+            time.sleep(1.0)
+
+    try:
+        if verbose:
+            print(f"[gap-shared] Run gap sweep and cache to: {os.path.basename(cache_path)}", flush=True)
+
+        data = {name: {k: [] for k in range(len(gap_list))} for name in scheduler_names}
+        last_hb = time.time()
+
+        # Repeat loop: per-repeat we will re-sample importance (if requested)
+        for r in range(repeat):
+            if verbose and ((r + 1) % print_every == 0 or r == 0):
+                print(f"[gap-shared] Repeat {r+1}/{repeat}", flush=True)
+
+            # Importance list per repeat
+            if str(importance_mode).lower() == "uniform":
+                a, b = map(float, importance_uniform)
+                imp_list_r = [float(rng.uniform(a, b)) for _ in node_path_list]
+            else:
+                imp_list_r = list(importance_list)
+
+            # Sweep over gaps
+            for k, gap in enumerate(gap_list):
+                if verbose:
+                    print(f"=== [GAP {noise_model}] gap={gap} ({k+1}/{len(gap_list)}) ===", flush=True)
+
+                # Heartbeat
+                now = time.time()
+                if now - last_hb >= HEARTBEAT_EVERY:
+                    try:
+                        os.utime(lock_path, None)
+                    except FileNotFoundError:
+                        pass
+                    last_hb = now
+
+                # Network generator for this 'gap' (fresh fidelities for each pair)
+                def network_generator(path_num, pair_idx):
+                    fids = _fidelity_list_gap_random(
+                        path_num=path_num,
+                        gap=float(gap),
+                        rng=rng,
+                        alpha_base=alpha_base,
+                        variance=variance,
+                    )
+                    return QuantumNetwork(path_num, fids, noise_model)
+
+                for name in scheduler_names:
+                    per_pair_results, total_cost, per_pair_details = run_scheduler(
+                        node_path_list=node_path_list, importance_list=imp_list_r,
+                        scheduler_name=name,
+                        bounces=list(bounces),
+                        C_total=int(C_total),
+                        network_generator=network_generator,
+                        return_details=True,
+                    )
+                    data[name][k].append({
+                        "per_pair_results": per_pair_results,
+                        "per_pair_details": per_pair_details,
+                        "total_cost": total_cost,
+                        "importance_list": imp_list_r,
+                        "gap": float(gap),
+                        "C_total": int(C_total),
+                        "alpha_base": float(alpha_base),
+                        "variance": float(variance),
+                    })
+
+        payload = {
+            "config": config,
+            "gap_list": list(map(float, gap_list)),
+            "data": data,
+        }
+
+        tmp = cache_path + ".tmp"
+        with open(tmp, "wb") as f:
+            pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp, cache_path)
+
+        return payload
+
+    finally:
+        if got_lock:
+            try:
+                os.remove(lock_path)
+            except FileNotFoundError:
+                pass
+
+
+# -----------------------------
+# Public API: plot (mean ± 95% CI)
+# -----------------------------
+def plot_accuracy_vs_gap(
+    gap_list, scheduler_names, noise_model,
+    node_path_list, importance_list,
+    bounces=(1, 2, 3, 4), repeat=10,
+    importance_mode="fixed", importance_uniform=(0.0, 1.0),
+    seed=None,
+    alpha_base=0.95, variance=0.10,
+    C_total_override=None,
+    verbose=True, print_every=1,
+):
+    """
+    Make a plot with x = gap, y = accuracy (mean ± 95% CI).
+    Uses alpha - beta = gap; fidelities are sampled per pair from Normal(mu, variance) clamped to [0.8,1.0].
+    """
+    file_name = f"plot_accuracy_vs_gap_{noise_model}"
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    outdir = os.path.join(root_dir, "outputs")
+    os.makedirs(outdir, exist_ok=True)
+
+    C_total = int(C_total_override) if C_total_override is not None else 5000
+
+    payload = _run_or_load_shared_gap_sweep(
+        gap_list, scheduler_names, noise_model,
+        node_path_list, importance_list,
+        bounces=bounces, repeat=repeat,
+        importance_mode=importance_mode, importance_uniform=importance_uniform, seed=seed,
+        alpha_base=alpha_base, variance=variance,
+        C_total=C_total,
+        verbose=verbose, print_every=print_every,
+    )
+
+    # Collect accuracy arrays per gap
+    results = {name: {"accs": [[] for _ in gap_list]} for name in scheduler_names}
+    for name in scheduler_names:
+        for k in range(len(gap_list)):
+            for run in payload["data"][name][k]:
+                per_pair_results = run["per_pair_results"]
+                vals = []
+                for r in per_pair_results:
+                    if isinstance(r, tuple):
+                        c = r[0]
+                    elif isinstance(r, (int, float, bool)):
+                        c = bool(r)
+                    else:
+                        raise TypeError(f"per_pair_results element has unexpected type: {type(r)} -> {r}")
+                    vals.append(1.0 if c else 0.0)
+
+                acc = float(np.mean(vals)) if vals else 0.0
+                results[name]["accs"][k].append(acc)
+
+    # Plot
+    plt.rc("axes", prop_cycle=default_cycler)
+    fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
+    xs = list(map(float, gap_list))
+
+    for name, data in results.items():
+        means, halfs = [], []
+        for vals in data["accs"]:
+            m, h = mean_ci95(vals)
+            means.append(m); halfs.append(h)
+        means = np.asarray(means); halfs = np.asarray(halfs)
+
+        label = name.replace("Vanilla NB","VanillaNB").replace("Succ. Elim. NB","SuccElimNB")
+        ax.plot(xs, means, linewidth=2.0, label=label)
+        ax.fill_between(xs, means - halfs, means + halfs, alpha=0.25)
+
+    ax.set_xlabel("Gap (alpha - beta)")
+    ax.set_ylabel("Average Correctness (mean ± 95% CI)")
+    ax.grid(True); ax.legend(title="Scheduler", fontsize=14, title_fontsize=18)
+
+    pdf = os.path.join(outdir, f"{file_name}.pdf")
+    plt.savefig(pdf)
+    if shutil.which("pdfcrop"):
+        os.system(f'pdfcrop --margins "8 8 8 8" "{pdf}" "{pdf}"')
+    print(f"Saved: {pdf}", flush=True)
+    return pdf
+
+
+if __name__ == "__main__":
+    # Minimal example (safe defaults). Adjust as needed.
+    gaps = [0.005, 0.01, 0.02, 0.03]
+    scheds = ["Vanilla NB", "Succ. Elim. NB", "Greedy Two-Phase"]
+    noise = "Depolar"
+    node_paths = [5, 5, 5]   # 3 pairs, each with 5 candidate links
+    importances = [1.0, 1.0, 1.0]
+
+    plot_accuracy_vs_gap(
+        gap_list=gaps,
+        scheduler_names=scheds,
+        noise_model=noise,
+        node_path_list=node_paths,
+        importance_list=importances,
+        bounces=(1,2,3,4),
+        repeat=5,
+        importance_mode="fixed",
+        seed=42,
+        alpha_base=0.95,
+        variance=0.10,
+        C_total_override=5000,
+    )
+
+
+# -----------------------------
+# Fixed arithmetic sequence (alpha_max -> step -gap) version
+# -----------------------------
+def _gap_sweep_signature_fix(gap_list, scheduler_names, noise_model,
+                             node_path_list, importance_list, bounces, repeat,
+                             importance_mode="fixed", importance_uniform=(0.0, 1.0), seed=None,
+                             fidelity_max=1.0):
+    payload = {
+        "gap_list": list(map(float, gap_list)),
+        "scheduler_names": list(scheduler_names),
+        "noise_model": str(noise_model),
+        "node_path_list": list(node_path_list),
+        "importance_list": list(importance_list) if importance_list is not None else None,
+        "importance_mode": str(importance_mode),
+        "importance_uniform": list(importance_uniform) if importance_uniform is not None else None,
+        "bounces": list(bounces),
+        "repeat": int(repeat),
+        "seed": int(seed) if seed is not None else None,
+        # fidelity-generation mode & params
+        "fidelity_mode": "fixed_arithmetic_gap",
+        "fidelity_max": float(fidelity_max),
+        "version": 1,
+    }
+    sig = hashlib.md5(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:10]
+    return payload, sig
+
+
+def _shared_gap_path_fix(noise_model, sig):
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    outdir = os.path.join(root_dir, "outputs")
+    os.makedirs(outdir, exist_ok=True)
+    return os.path.join(outdir, f"shared_gapFIX_{noise_model}_{sig}.pickle")
+
+
+def _run_or_load_shared_gap_sweep_fix(
+    gap_list, scheduler_names, noise_model,
+    node_path_list, importance_list,
+    bounces=(1, 2, 3, 4), repeat=10,
+    importance_mode="fixed", importance_uniform=(0.0, 1.0),
+    seed=None, fidelity_max=1.0,
+    C_total=5000,
+    verbose=True, print_every=1,
+):
+    """
+    固定等差列 fidelities（最大値=fidelity_max, 公差=gap）で各 gap をスイープする。
+    トポロジ生成は gap ごと・宛先ペアごとに同じ規則で決まる（乱数は使わない）。
+    """
+    config, sig = _gap_sweep_signature_fix(
+        gap_list, scheduler_names, noise_model,
+        node_path_list, importance_list, bounces, repeat,
+        importance_mode=importance_mode, importance_uniform=importance_uniform, seed=seed,
+        fidelity_max=fidelity_max,
+    )
+    cache_path = _shared_gap_path_fix(noise_model, sig)
+    lock_path = cache_path + ".lock"
+    STALE_LOCK_SECS = 6 * 60 * 60
+    HEARTBEAT_EVERY = 5.0
+
+    # すでにキャッシュがあれば即返す
+    if os.path.exists(cache_path):
+        with open(cache_path, "rb") as f:
+            return pickle.load(f)
+
+    # ロック獲得
+    got_lock = False
+    while True:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            got_lock = True
+            break
+        except FileExistsError:
+            if os.path.exists(cache_path):
+                with open(cache_path, "rb") as f:
+                    return pickle.load(f)
+            try:
+                age = time.time() - os.path.getmtime(lock_path)
+            except OSError:
+                age = 0
+            if age > STALE_LOCK_SECS:
+                try:
+                    os.remove(lock_path)
+                except FileNotFoundError:
+                    pass
+                continue
+            time.sleep(1.0)
+
+    try:
+        if verbose:
+            print(f"[gap-fixed] Run gap sweep (fixed sequence) -> {os.path.basename(cache_path)}", flush=True)
+
+        data = {name: {k: [] for k in range(len(gap_list))} for name in scheduler_names}
+        last_hb = time.time()
+
+        for r in range(repeat):
+            if verbose and ((r + 1) % print_every == 0 or r == 0):
+                print(f"[gap-fixed] Repeat {r+1}/{repeat}", flush=True)
+
+            # 反復ごとの重要度
+            if str(importance_mode).lower() == "uniform":
+                a, b = map(float, importance_uniform)
+                imp_list_r = [float(np.random.uniform(a, b)) for _ in node_path_list]
+            else:
+                imp_list_r = list(importance_list)
+
+            for k, gap in enumerate(gap_list):
+                if verbose:
+                    print(f"=== [GAP FIX {noise_model}] gap={gap} ({k+1}/{len(gap_list)}) ===", flush=True)
+
+                now = time.time()
+                if now - last_hb >= HEARTBEAT_EVERY:
+                    try:
+                        os.utime(lock_path, None)
+                    except FileNotFoundError:
+                        pass
+                    last_hb = now
+
+                # 固定列版ネットワーク生成
+                def network_generator(path_num, pair_idx):
+                    fids = generate_fidelity_list_fix_gap(
+                        path_num=path_num,
+                        gap=float(gap),
+                        fidelity_max=float(fidelity_max),
+                    )
+                    return QuantumNetwork(path_num, fids, noise_model)
+
+                for name in scheduler_names:
+                    per_pair_results, total_cost, per_pair_details = run_scheduler(
+                        node_path_list=node_path_list, importance_list=imp_list_r,
+                        scheduler_name=name,
+                        bounces=list(bounces),
+                        C_total=int(C_total),
+                        network_generator=network_generator,
+                        return_details=True,
+                    )
+                    data[name][k].append({
+                        "per_pair_results": per_pair_results,
+                        "per_pair_details": per_pair_details,
+                        "total_cost": total_cost,
+                        "importance_list": imp_list_r,
+                        "gap": float(gap),
+                        "C_total": int(C_total),
+                        "fidelity_max": float(fidelity_max),
+                    })
+
+        payload = {
+            "config": config,
+            "gap_list": list(map(float, gap_list)),
+            "data": data,
+        }
+
+        tmp = cache_path + ".tmp"
+        with open(tmp, "wb") as f:
+            pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp, cache_path)
+
+        return payload
+
+    finally:
+        if got_lock:
+            try:
+                os.remove(lock_path)
+            except FileNotFoundError:
+                pass
+
+
+def plot_accuracy_vs_gap_fixgap(
+    gap_list, scheduler_names, noise_model,
+    node_path_list, importance_list,
+    bounces=(1, 2, 3, 4), repeat=10,
+    importance_mode="fixed", importance_uniform=(0.0, 1.0),
+    seed=None,             # 乱数は重要度ユニフォーム時のみ利用
+    fidelity_max=1.0,
+    C_total_override=None,
+    verbose=True, print_every=1,
+):
+    """
+    x = gap, y = accuracy（mean ± 95% CI）
+    忠実度列は固定等差列: [fidelity_max, fidelity_max-gap, ...] を path_num 要素ぶん切り出し。
+    """
+    file_name = f"plot_accuracy_vs_gap_fixgap_{noise_model}"
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    outdir = os.path.join(root_dir, "outputs")
+    os.makedirs(outdir, exist_ok=True)
+
+    C_total = int(C_total_override) if C_total_override is not None else 5000
+
+    # 乱数の用途は重要度ユニフォームのサンプリングのみ
+    if seed is not None:
+        np.random.seed(int(seed))
+
+    payload = _run_or_load_shared_gap_sweep_fix(
+        gap_list, scheduler_names, noise_model,
+        node_path_list, importance_list,
+        bounces=bounces, repeat=repeat,
+        importance_mode=importance_mode, importance_uniform=importance_uniform,
+        seed=seed, fidelity_max=fidelity_max,
+        C_total=C_total,
+        verbose=verbose, print_every=print_every,
+    )
+
+    # Collect accuracy arrays per gap
+    results = {name: {"accs": [[] for _ in gap_list]} for name in scheduler_names}
+    for name in scheduler_names:
+        for k in range(len(gap_list)):
+            for run in payload["data"][name][k]:
+                per_pair_results = run["per_pair_results"]
+                vals = []
+                for r in per_pair_results:
+                    if isinstance(r, tuple):
+                        c = r[0]
+                    elif isinstance(r, (int, float, bool)):
+                        c = bool(r)
+                    else:
+                        raise TypeError(f"per_pair_results element has unexpected type: {type(r)} -> {r}")
+                    vals.append(1.0 if c else 0.0)
+                acc = float(np.mean(vals)) if vals else 0.0
+                results[name]["accs"][k].append(acc)
+
+    # Plot
+    plt.rc("axes", prop_cycle=default_cycler)
+    fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
+    xs = list(map(float, gap_list))
+
+    for name, data in results.items():
+        means, halfs = [], []
+        for vals in data["accs"]:
+            m, h = mean_ci95(vals)
+            means.append(m); halfs.append(h)
+        means = np.asarray(means); halfs = np.asarray(halfs)
+
+        label = name.replace("Vanilla NB","VanillaNB").replace("Succ. Elim. NB","SuccElimNB")
+        ax.plot(xs, means, linewidth=2.0, label=label)
+        ax.fill_between(xs, means - halfs, means + halfs, alpha=0.25)
+
+    ax.set_xlabel("Gap (fixed arithmetic sequence)")
+    ax.set_ylabel("Average Correctness (mean ± 95% CI)")
+    ax.grid(True); ax.legend(title="Scheduler", fontsize=14, title_fontsize=18)
+
+    pdf = os.path.join(outdir, f"{file_name}.pdf")
+    plt.savefig(pdf)
+    if shutil.which("pdfcrop"):
+        os.system(f'pdfcrop --margins "8 8 8 8" "{pdf}" "{pdf}"')
+    print(f"Saved: {pdf}", flush=True)
+    return pdf
+
+
