@@ -371,7 +371,7 @@ def plot_accuracy_vs_budget(
     ax.set_ylabel("Average Correctness (mean ± 95% CI)")
     ax.grid(True); ax.legend(title="Scheduler", fontsize=14, title_fontsize=18)
 
-    pdf = f"{file_name}.pdf"
+    pdf = os.path.join(outdir, f"{file_name}.pdf")  
     plt.savefig(pdf)
     if shutil.which("pdfcrop"):
         os.system(f'pdfcrop --margins "8 8 8 8" {pdf} {pdf}')
@@ -464,7 +464,7 @@ def plot_value_vs_used(
     ax.set_ylabel("Σ_d I_d · true_fid(j*_d) (mean ± 95% CI)")
     ax.grid(True); ax.legend(title="Scheduler")
 
-    pdf = f"{file_name}.pdf"
+    pdf = os.path.join(outdir, f"{file_name}.pdf")   
     plt.savefig(pdf)
     if shutil.which("pdfcrop"):
         os.system(f'pdfcrop --margins "8 8 8 8" {pdf} {pdf}')

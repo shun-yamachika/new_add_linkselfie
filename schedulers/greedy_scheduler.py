@@ -33,7 +33,7 @@ def greedy_budget_scheduler(
     consumed_total = 0
 
     # 返却用の器
-    per_pair_results = {i: (False, 0, None) for i in range(N_pairs)}  # (correctness, cost, best_path_fid)
+    per_pair_results = [(False, 0, None) for _ in range(N_pairs)]
     per_pair_details = [
         {"alloc_by_path": {}, "est_fid_by_path": {}} for _ in range(N_pairs)
     ] if return_details else None

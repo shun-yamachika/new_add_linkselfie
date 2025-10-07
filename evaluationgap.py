@@ -229,7 +229,7 @@ def _run_or_load_shared_gap_sweep(
                     if mode == "fixed":
                         fids = _fidelity_list_gap_fixed(path_num=int(path_num), gap=float(gap), fidelity_max=1.0)
                     else:
-                        fids = _fidelity_list_gap_random(path_num=int(path_num), gap=float(gap),
+                        fids = _fidelity_list_gap(path_num=int(path_num), gap=float(gap),
                                                          rng=rng, alpha_base=alpha_base, variance=variance)
                     fidelity_bank.append(fids)
 
