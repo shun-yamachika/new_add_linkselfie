@@ -25,8 +25,15 @@ from viz.plots import mean_ci95, plot_with_ci_band
 from network import QuantumNetwork
 from schedulers import run_scheduler  # スケジューラ呼び出し
 
-# ★ 追加：path_id キー統一のユーティリティ
+
 from utils.ids import to_idx0, normalize_to_1origin, is_keys_1origin
+
+from utils.fidelity import (
+    generate_fidelity_list_avg_gap,
+    generate_fidelity_list_fix_gap,
+    generate_fidelity_list_random,
+    _generate_fidelity_list_random_rng,
+)
 
 import matplotlib as mpl
 mpl.rcParams["figure.constrained_layout.use"] = True
@@ -49,63 +56,6 @@ default_cycler = (
 )
 plt.rc("axes", prop_cycle=default_cycler)
 
-# =========================
-# Fidelity generators (old API; keep for compatibility)
-# =========================
-def generate_fidelity_list_avg_gap(path_num):
-    result = []
-    fidelity_max = 1
-    fidelity_min = 0.9
-    gap = (fidelity_max - fidelity_min) / path_num
-    fidelity = fidelity_max
-    for _ in range(path_num):
-        result.append(fidelity)
-        fidelity -= gap
-    assert len(result) == path_num
-    return result
-
-def generate_fidelity_list_fix_gap(path_num, gap, fidelity_max=1):
-    result = []
-    fidelity = fidelity_max
-    for _ in range(path_num):
-        result.append(fidelity)
-        fidelity -= gap
-    assert len(result) == path_num
-    return result
-
-def generate_fidelity_list_random(path_num, alpha=0.90, beta=0.85, variance=0.1):
-    """(非決定版) Generate `path_num` links with a guaranteed top-1 gap."""
-    while True:
-        mean = [alpha] + [beta] * (path_num - 1)
-        result = []
-        for i in range(path_num):
-            mu = mean[i]
-            # [0.8, 1.0] の範囲に入るまでサンプリング
-            while True:
-                r = np.random.normal(mu, variance)
-                if 0.8 <= r <= 1.0:
-                    break
-            result.append(r)
-        assert len(result) == path_num
-        sorted_res = sorted(result, reverse=True)
-        if sorted_res[0] - sorted_res[1] > 0.02:
-            return result
-
-# 再現性のため：rng を使ったバージョン
-def _generate_fidelity_list_random_rng(rng, path_num, alpha=0.95, beta=0.85, variance=0.1):
-    while True:
-        mean = [alpha] + [beta] * (path_num - 1)
-        res = []
-        for mu in mean:
-            # [0.8, 1.0] の範囲に入るまでサンプリング
-            while True:
-                r = rng.normal(mu, variance)
-                if 0.8 <= r <= 1.0:
-                    break
-            res.append(float(r))
-        sorted_res = sorted(res, reverse=True)
-        if sorted_res[0] - sorted_res[1] > 0.02:
-            return res
 
 # =========================
 # Progress helpers

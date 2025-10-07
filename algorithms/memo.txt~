@@ -1,5 +1,0 @@
-correctness: 選んだパスが真の最良パスかどうか（True/False）
-
-cost: 使った総コスト
-
-best_path_fidelity: 選んだパスの推定忠実度

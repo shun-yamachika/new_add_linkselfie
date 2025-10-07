@@ -18,8 +18,15 @@ from network import QuantumNetwork
 from schedulers import run_scheduler
 from viz.plots import mean_ci95
 
-# ★ 追加：1-origin キー統一ユーティリティ
+
 from utils.ids import to_idx0, normalize_to_1origin, is_keys_1origin
+
+from utils.fidelity import (
+    generate_fidelity_list_avg_gap,
+    generate_fidelity_list_fix_gap,
+    generate_fidelity_list_random,
+    _generate_fidelity_list_random_rng,
+)
 
 # ---- Matplotlib style (match evaluation.py) ----
 mpl.rcParams["figure.constrained_layout.use"] = True

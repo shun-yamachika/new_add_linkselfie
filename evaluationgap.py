@@ -1,7 +1,7 @@
 # evaluationgap.py — Gap sweep: x = gap, y = accuracy (mean ± 95% CI)
 # Supports:
-#   (2a) Random gap mode   : alpha = alpha_base, beta = alpha - gap, then random sampling
-#   (2b) Fixed  gap mode   : deterministic arithmetic sequence with gap
+#   (2a) Random gap mode   : alpha = alpha_base, beta = alpha - gap, then random sampling (utils.fidelity)
+#   (2b) Fixed  gap mode   : deterministic arithmetic sequence with gap       (utils.fidelity)
 #
 # Both modes inject true_fid_by_path with 1-origin keys and normalize est_fid_by_path to 1-origin.
 
@@ -22,8 +22,11 @@ from network import QuantumNetwork
 from schedulers import run_scheduler
 from viz.plots import mean_ci95
 
-# 1-origin key utilities
 from utils.ids import to_idx0, normalize_to_1origin, is_keys_1origin
+from utils.fidelity import (
+    generate_fidelity_list_fix_gap,
+    _generate_fidelity_list_random_rng,
+)
 
 # ---- Matplotlib style (align with evaluation.py) ----
 mpl.rcParams["figure.constrained_layout.use"] = True
@@ -43,55 +46,6 @@ _default_cycler = (
     + cycler(linestyle=[":", "--", "-", "-.", "--", ":"])
 )
 plt.rc("axes", prop_cycle=_default_cycler)
-
-
-# -----------------------------
-# Fidelity generators
-# -----------------------------
-def _generate_fidelity_list_random_rng(rng: np.random.Generator, path_num: int,
-                                       alpha: float = 0.95, beta: float = 0.85, variance: float = 0.1) -> List[float]:
-    """
-    Random list of length `path_num`:
-      top-1 mean = alpha, others mean = beta, Normal(mu, variance) clamped to [0.8, 1.0].
-    Ensures a visible top-1 gap (>0.02) after sorting.
-    """
-    while True:
-        mean = [alpha] + [beta] * (path_num - 1)
-        res = []
-        for mu in mean:
-            # rejection into [0.8, 1.0]
-            while True:
-                r = rng.normal(mu, variance)
-                if 0.8 <= r <= 1.0:
-                    break
-            res.append(float(r))
-        sorted_res = sorted(res, reverse=True)
-        if len(sorted_res) >= 2 and (sorted_res[0] - sorted_res[1]) > 0.02:
-            return res
-
-
-def _fidelity_list_gap(path_num: int, gap: float, rng: np.random.Generator,
-                              alpha_base: float = 0.95, variance: float = 0.1) -> List[float]:
-    """
-    Random gap mode: alpha = alpha_base, beta = alpha - gap, then random sampling in [0.8,1.0].
-    """
-    alpha = float(alpha_base)
-    beta = float(alpha_base - gap)
-    beta = min(max(beta, 0.8), max(alpha - 1e-6, 0.8))
-    return _generate_fidelity_list_random_rng(rng, path_num, alpha=alpha, beta=beta, variance=variance)
-
-
-def _fidelity_list_gap_fixed(path_num: int, gap: float, fidelity_max: float = 1.0) -> List[float]:
-    """
-    Fixed gap mode: deterministic arithmetic sequence of length `path_num`:
-      [fidelity_max, fidelity_max-gap, fidelity_max-2*gap, ...]
-    """
-    result = []
-    f = float(fidelity_max)
-    for _ in range(path_num):
-        result.append(f)
-        f -= float(gap)
-    return result
 
 
 # -----------------------------
@@ -227,10 +181,18 @@ def _run_or_load_shared_gap_sweep(
                 fidelity_bank: List[List[float]] = []
                 for pair_idx, path_num in enumerate(node_path_list):
                     if mode == "fixed":
-                        fids = _fidelity_list_gap_fixed(path_num=int(path_num), gap=float(gap), fidelity_max=1.0)
+                        # 等差列: fidelity_max から gap ずつ下げる
+                        fids = generate_fidelity_list_fix_gap(
+                            path_num=int(path_num), gap=float(gap), fidelity_max=1.0
+                        )
                     else:
-                        fids = _fidelity_list_gap(path_num=int(path_num), gap=float(gap),
-                                                         rng=rng, alpha_base=alpha_base, variance=variance)
+                        # ランダム: alpha=alpha_base, beta=alpha_base-gap
+                        alpha = float(alpha_base)
+                        beta = float(alpha_base) - float(gap)
+                        fids = _generate_fidelity_list_random_rng(
+                            rng=rng, path_num=int(path_num),
+                            alpha=alpha, beta=beta, variance=float(variance)
+                        )
                     fidelity_bank.append(fids)
 
                 # network generator uses the saved bank
@@ -313,7 +275,7 @@ def plot_accuracy_vs_gap(
     verbose: bool = True, print_every: int = 1,
 ) -> str:
     """
-    (2a) Gap vs Accuracy — Random mode
+    (2a) Gap vs Accuracy — Random mode (utils.fidelity)
     """
     file_name = f"plot_accuracy_vs_gap_random_{noise_model}"
     root_dir = os.path.dirname(os.path.abspath(__file__))
@@ -388,7 +350,7 @@ def plot_accuracy_vs_gap_fixgap(
     verbose: bool = True, print_every: int = 1,
 ) -> str:
     """
-    (2b) Gap vs Accuracy — Fixed arithmetic sequence mode
+    (2b) Gap vs Accuracy — Fixed arithmetic sequence mode (utils.fidelity)
     """
     # 固定列では rng は使わないが、署名の再現性のため seed を渡しておく
     file_name = f"plot_accuracy_vs_gap_fixed_{noise_model}"
@@ -436,16 +398,19 @@ def plot_accuracy_vs_gap_fixgap(
         means, halfs = [], []
         for vals in data["accs"]:
             m, h = mean_ci95(vals)
-            means.append(m); halfs.append(h)
-        means = np.asarray(means); halfs = np.asarray(halfs)
+            means.append(m)
+            halfs.append(h)
+        means = np.asarray(means)
+        halfs = np.asarray(halfs)
 
-        label = name.replace("Vanilla NB","VanillaNB").replace("Succ. Elim. NB","SuccElimNB")
+        label = name.replace("Vanilla NB", "VanillaNB").replace("Succ. Elim. NB", "SuccElimNB")
         ax.plot(xs, means, linewidth=2.0, label=label)
         ax.fill_between(xs, means - halfs, means + halfs, alpha=0.25)
 
     ax.set_xlabel("Gap (arithmetic sequence)")
     ax.set_ylabel("Average Correctness (mean ± 95% CI)")
-    ax.grid(True); ax.legend(title="Scheduler", fontsize=14, title_fontsize=18)
+    ax.grid(True)
+    ax.legend(title="Scheduler", fontsize=14, title_fontsize=18)
 
     pdf = os.path.join(outdir, f"{file_name}.pdf")
     plt.savefig(pdf)
