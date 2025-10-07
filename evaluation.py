@@ -25,6 +25,9 @@ from viz.plots import mean_ci95, plot_with_ci_band
 from network import QuantumNetwork
 from schedulers import run_scheduler  # スケジューラ呼び出し
 
+# ★ 追加：path_id キー統一のユーティリティ
+from utils.ids import to_idx0, normalize_to_1origin, is_keys_1origin
+
 import matplotlib as mpl
 mpl.rcParams["figure.constrained_layout.use"] = True
 mpl.rcParams["savefig.bbox"] = "tight"   # すべての savefig に適用
@@ -70,7 +73,7 @@ def generate_fidelity_list_fix_gap(path_num, gap, fidelity_max=1):
     assert len(result) == path_num
     return result
 
-def generate_fidelity_list_random(path_num, alpha=0.95, beta=0.85, variance=0.1):
+def generate_fidelity_list_random(path_num, alpha=0.90, beta=0.85, variance=0.1):
     """(非決定版) Generate `path_num` links with a guaranteed top-1 gap."""
     while True:
         mean = [alpha] + [beta] * (path_num - 1)
@@ -137,7 +140,7 @@ def _sweep_signature(budget_list, scheduler_names, noise_model,
         "bounces": list(bounces),
         "repeat": int(repeat),
         "seed": int(seed) if seed is not None else None,
-        "version": 3,  # 鍵仕様更新（seed/importance含む）
+        "version": 5,  # schema: true_fid_by_path を 1-origin に統一
     }
     sig = hashlib.md5(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:10]
     return payload, sig
@@ -166,7 +169,7 @@ def _run_or_load_shared_sweep(
     STALE_LOCK_SECS = 6 * 60 * 60        # 6時間無更新ならロック回収
     HEARTBEAT_EVERY = 5.0                # 生成側のロック更新間隔（秒）
 
-    rng = np.random.default_rng(seed)    # ★ 乱数生成器（再現性の核）
+    rng = np.random.default_rng(seed)    # 乱数生成器（再現性の核）
 
     # 既存キャッシュがあれば即ロード
     if os.path.exists(cache_path):
@@ -251,6 +254,33 @@ def _run_or_load_shared_sweep(
                         network_generator=network_generator,
                         return_details=True,
                     )
+
+                    # --- 真の忠実度 true_fid_by_path を per_pair_details に注入 ---
+                    # キーは est_fid_by_path のキー体系（整数1..Lに正規化）に合わせる。無ければ 1..L。
+                    for d, det in enumerate(per_pair_details):
+                        true_list = fidelity_bank[d]              # 0-origin list of true fidelities
+                        est_map = det.get("est_fid_by_path", {})  # 本来 {1..L} を想定
+
+                        L = len(true_list)
+
+                        # 1) 推定辞書を 1-origin に正規化（0-originで来た場合でも吸収）
+                        if est_map:
+                            est_map_norm = normalize_to_1origin(
+                                {int(k): float(v) for k, v in est_map.items()}, L
+                            )
+                        else:
+                            est_map_norm = {}  # 未測定なら空のまま（値計算側で0寄与にする）
+
+                        # 2) 真値辞書を 1-origin で構築（内部 true_list は 0-origin なので to_idx0）
+                        true_map = {pid: float(true_list[to_idx0(pid)]) for pid in range(1, L + 1)}
+
+                        # 3) 厳格検査（任意だが、デバッグの早期検出に有用）
+                        if est_map_norm and not is_keys_1origin(est_map_norm.keys(), L):
+                            raise RuntimeError(f"[inject] est_fid_by_path keys not 1..{L} (pair={d})")
+
+                        det["est_fid_by_path"]  = est_map_norm
+                        det["true_fid_by_path"] = true_map
+
                     data[name][k].append({
                         "per_pair_results": per_pair_results,
                         "per_pair_details": per_pair_details,
@@ -349,7 +379,7 @@ def plot_accuracy_vs_budget(
 
 # =========================
 # 2) Value vs Used（x=実コスト平均, y=Σ_d I_d * true_fid(j*_d) の平均±95%CI）
-#    ※ j*_d は宛先 d における「推定忠実度が最大」のリンク
+#    ※ j*_d は宛先 d における「推定忠実度が最大」のリンク（path_id は 1..L）
 # =========================
 def plot_value_vs_used(
     budget_list, scheduler_names, noise_model,
@@ -383,8 +413,8 @@ def plot_value_vs_used(
                 I_used = run.get("importance_list", importance_list)
 
                 for d, det in enumerate(per_pair_details):
-                    est   = det.get("est_fid_by_path", {})   # {path: estimated_fidelity}
-                    true_ = det.get("true_fid_by_path", {})  # {path: true_fidelity}（全候補リンクの真値）
+                    est   = det.get("est_fid_by_path", {})   # {path_id(1..L): estimated_fidelity}
+                    true_ = det.get("true_fid_by_path", {})  # {path_id(1..L): true_fidelity}
 
                     # 1) 真値辞書が無いのは設定不整合 → 例外で明示
                     if not true_:

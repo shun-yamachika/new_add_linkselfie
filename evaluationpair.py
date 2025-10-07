@@ -1,22 +1,5 @@
-
 # evaluationpair.py — Sweep "number of destination pairs" (x) vs Accuracy (y)
-# Designed to align with the existing evaluation.py/main.py pipeline.
-#
-# Usage example (from your own script or REPL):
-#   from evaluationpair import plot_accuracy_vs_pairs
-#   plot_accuracy_vs_pairs(
-#       pairs_list=[1,2,3,4,5,6],
-#       paths_per_pair=5,
-#       C_total=6000,
-#       scheduler_names=["Greedy", "LNaive"],
-#       noise_model="Depolar",
-#       bounces=(1,2,3,4),
-#       repeat=25,
-#       importance_mode="uniform",   # or "fixed"
-#       importance_uniform=(0.0,1.0),
-#       seed=12,
-#       verbose=True
-#   )
+# Designed to align with evaluation.py pipeline (1-origin keys, utils.ids normalization).
 #
 # Produces: outputs/plot_accuracy_vs_pairs_<noise_model>.pdf
 
@@ -31,10 +14,12 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 from cycler import cycler
 
-# Reuse core components from your existing codebase
-from network import QuantumNetwork  # existing class
-from schedulers import run_scheduler    # existing dispatcher
-from viz.plots import mean_ci95         # existing helper
+from network import QuantumNetwork
+from schedulers import run_scheduler
+from viz.plots import mean_ci95
+
+# ★ 追加：1-origin キー統一ユーティリティ
+from utils.ids import to_idx0, normalize_to_1origin, is_keys_1origin
 
 # ---- Matplotlib style (match evaluation.py) ----
 mpl.rcParams["figure.constrained_layout.use"] = True
@@ -63,7 +48,7 @@ def _log(msg: str):
     print(msg, flush=True)
 
 def _generate_fidelity_list_random_rng(rng: np.random.Generator, path_num: int,
-                                       alpha: float = 0.95, beta: float = 0.85, variance: float = 0.1):
+                                       alpha: float = 0.90, beta: float = 0.85, variance: float = 0.1):
     """Generate `path_num` link fidelities in [0.8, 1.0], ensuring a small top-1 gap."""
     while True:
         mean = [alpha] + [beta] * (path_num - 1)
@@ -95,7 +80,7 @@ def _sweep_signature_pairs(pairs_list, paths_per_pair, C_total, scheduler_names,
         "importance_mode": str(importance_mode),
         "importance_uniform": list(importance_uniform) if importance_uniform is not None else None,
         "seed": int(seed) if seed is not None else None,
-        "version": 1
+        "version": 2,  # ★ schema: per_pair_details の est/true_fid_by_path を 1-origin へ統一
     }
     sig = hashlib.md5(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:10]
     return payload, sig
@@ -184,7 +169,7 @@ def _run_or_load_pair_sweep(
                     a, b = map(float, importance_uniform)
                     importance_list = [float(rng.uniform(a, b)) for _ in node_path_list]
                 else:
-                    # fixed mode: if user wants exact values, they can tune outside; default all ones
+                    # fixed mode: default all ones
                     importance_list = [1.0 for _ in node_path_list]
 
                 def network_generator(path_num, pair_idx):
@@ -200,6 +185,20 @@ def _run_or_load_pair_sweep(
                         network_generator=network_generator,
                         return_details=True,
                     )
+
+                    # ★ evaluation.py と同様に、真値辞書（1..L）を注入し推定辞書を 1-origin に正規化
+                    for d, det in enumerate(per_pair_details):
+                        L = node_path_list[d]
+                        est_map = det.get("est_fid_by_path", {})
+                        if est_map:
+                            est_map_norm = normalize_to_1origin({int(k): float(v) for k, v in est_map.items()}, L)
+                        else:
+                            est_map_norm = {}
+                        true_map = {pid: float(fidelity_bank[d][to_idx0(pid)]) for pid in range(1, L + 1)}
+                        if est_map_norm and not is_keys_1origin(est_map_norm.keys(), L):
+                            raise RuntimeError(f"[inject] est_fid_by_path keys not 1..{L} (pair={d})")
+                        det["est_fid_by_path"]  = est_map_norm
+                        det["true_fid_by_path"] = true_map
 
                     data[name][k].append({
                         "per_pair_results": per_pair_results,
@@ -314,7 +313,6 @@ def plot_accuracy_vs_pairs(
 
 if __name__ == "__main__":
     # Minimal CLI for quick testing
-    # Example: python evaluationpair.py
     pairs_list = [1, 2, 3, 4, 5, 6]
     paths_per_pair = 5
     C_total = 6000
