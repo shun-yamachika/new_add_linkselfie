@@ -11,17 +11,17 @@ from evaluationpair import plot_accuracy_vs_pairs
 # Simple configuration
 # =====================
 # Toggle which experiments to run
-RUN_BUDGET     = True
-RUN_GAP_RANDOM = True   # existing: alpha - beta = gap (randomized fidelities)
-RUN_GAP_FIX    = True   # NEW: fixed arithmetic sequence fidelities
-RUN_PAIRS      = True
+RUN_BUDGET     = False   
+RUN_GAP_RANDOM = False   
+RUN_GAP_FIX    = True
+RUN_PAIRS      = False
 
 # Global seed + common settings
-SEED        = 12
+SEED        = 13
 NOISE_MODEL = "Depolar"
 BOUNCES     = (1, 2, 3, 4)
-REPEAT      = 10
-SCHEDULERS  = ["LNaive", "Greedy"]
+REPEAT      = 5
+SCHEDULERS  = ["LNaive","Greedy"]
 
 # Importance settings
 # NOTE: "uniform" のときは *_IMPORTANCES は使われず、各リピートで U[a,b] から再サンプルされます
@@ -31,9 +31,9 @@ IMPORTANCE_UNIFORM = (0.0, 1.0)         # used only if IMPORTANCE_MODE == "unifo
 # -----------------
 # 1) Budget sweep
 # -----------------
-BUDGET_LIST         = [3000, 4000, 5000, 6000, 7000, 8000]
-BUDGET_NODE_PATHS   = [4,4,4,4,4]         
-BUDGET_IMPORTANCES  = [0.3, 0.6, 0.9]   # Budget専用: IMPORTANCE_MODE == "fixed" のときのみ使用
+BUDGET_LIST         = [4000]
+BUDGET_NODE_PATHS   = [4,4,4,4,4,4,4,4,4,4]         
+BUDGET_IMPORTANCES  = [1,1,1,1,1,1,1,1,1,0.1]   # Budget専用: IMPORTANCE_MODE == "fixed" のときのみ使用
 
 # --------------
 # 2) Gap sweeps
@@ -42,15 +42,15 @@ BUDGET_IMPORTANCES  = [0.3, 0.6, 0.9]   # Budget専用: IMPORTANCE_MODE == "fixe
 GAP_LIST_RANDOM        = [0.025, 0.05, 0.075, 0.10, 0.125, 0.150]
 ALPHA_BASE             = 0.95
 VARIANCE               = 0.025
-C_GAP_TOTAL            = 5000           # total budget per gap point
+C_GAP_TOTAL            = 10000           # total budget per gap point
 GAP_RANDOM_NODE_PATHS  = [4,4,4,4,4]  
 GAP_RANDOM_IMPORTANCES = [0.3, 0.6, 0.9, 0.6, 0.3]  # fixed時のみ使用（長さ=ペア数に合わせる）
 
 # (b) Fixed arithmetic-sequence version
-GAP_LIST_FIX        = [0.005, 0.01, 0.02, 0.03]
+GAP_LIST_FIX        = [0.01, 0.02,0.05,0.1]
 FIDELITY_MAX        = 1.0              # sequence starts at this max and steps down by 'gap'
-GAP_FIX_NODE_PATHS  = [4,4,4,4,4]  
-GAP_FIX_IMPORTANCES = [0.3, 0.6, 0.9, 0.6, 0.3]    # fixed時のみ使用
+GAP_FIX_NODE_PATHS  = [4,4,4,4]  
+GAP_FIX_IMPORTANCES = [0.3, 0.6, 0.9, 0.3]    # fixed時のみ使用
 
 # --------------------
 # 3) #Pairs (N) sweep

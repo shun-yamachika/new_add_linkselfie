@@ -176,3 +176,18 @@ def lonline_continue(
         base += (alloc_by_path, est_fid_by_path)
     return (*base, new_state, insufficient_budget)
 # === 修正ここまで ===
+def _dry_phase_cost(state, C_budget, C_const=None, delta=None, min_sets=None):
+    import math
+    s = int(state.get("s", 1))
+    k = len(state.get("candidate_set", []))
+    bounces = state.get("bounces", [])
+    c_B = sum(bounces) if bounces else 1
+    C_const = state.get("C_const", 0.01) if C_const is None else C_const
+    delta   = state.get("delta", 0.1)    if delta   is None else delta
+    min_sets = state.get("min_sets", 4)  if min_sets is None else min_sets
+    def Ns(s,k): 
+        val = math.ceil(C_const * (2**(2*s)) * math.log2(max((2**s)*k/delta, 2)))
+        return max(val, min_sets)
+    need_s2 = k * Ns(2,k) * c_B
+    need_s3 = k * Ns(3,k) * c_B
+    return dict(s=s, k=k, c_B=c_B, need_s2=need_s2, need_s3=need_s3, C_budget=int(C_budget))

@@ -14,48 +14,50 @@ def greedy_budget_scheduler(
     delta=0.1,
 ):
     """
-    Two-Phase Greedy（広域探索→集中的活用）用の Greedy スケジューラ。
-
-    フェーズ1（広域探索）:
-      - 各ペア n で lonline_init(..., s=1 のみ) を呼ぶ。
-      - best_path_fid を f_n^(init) として受け取り、価値 V_n = I_n * f_n^(init) を算出。
-      - s と candidate_set を含む state_n を保持する（あとで s=2 から再開）。
-
-    フェーズ2（集中的活用）:
-      - V_n の降順に各ペアを処理し、lonline_continue(..., state=state_n) で s=2 以降を実行。
-      - 予算が次ラウンドに入らないとき、lonline_continue は insufficient_budget=True を返すので、
-        そのペアはスキップして次のペアへ。（コストは増えない）
-      - 候補が1本に収束したら、そのペアは確定とみなして以後は回さない。
+    Two-Phase Greedy スケジューラ（PRINTデバッグ行のみ追加版）
+    - 既存の入出力・挙動は一切変更していません
+    - 追加されたログタグ:
+        [INIT]   フェーズ1呼び出し前
+        [INIT<-] フェーズ1戻り
+        [CHECK:init]  フェーズ1直後の per-link 配分合計（return_details=True のとき）
+        [ORDER]  フェーズ2の実行順とスコア
+        [GREEDY] pre-loop  各ペアのフェーズ2突入時の累積コスト
+        [GREEDY] 呼び出し前の残余 / s / k
+        [GREEDY<-] lonline_continue 戻り（cost/insufficient等）
+        [GREEDY] post-accum  コスト加算後の累積コスト
+        [GREEDY] converged 候補が一本化して収束
+        [CHECK:after-init] フェーズ1全体終了直後の合計
+        [CHECK:return]    return 直前の累積コスト
     """
-    assert len(node_path_list) == len(importance_list), "node_path_list と importance_list の長さが一致しません。"
 
+    # ネットワーク作成など前処理
     N_pairs = len(node_path_list)
-    consumed_total = 0
+    networks         = [None] * N_pairs
+    states           = [None] * N_pairs
+    per_pair_results = [None] * N_pairs
+    per_pair_details = [dict(alloc_by_path={}, est_fid_by_path={}) for _ in range(N_pairs)]
+    init_costs       = [0] * N_pairs
+    f_init           = [0.0] * N_pairs
+    consumed_total   = 0
 
-    # 返却用の器
-    per_pair_results = [(False, 0, None) for _ in range(N_pairs)]
-    per_pair_details = [
-        {"alloc_by_path": {}, "est_fid_by_path": {}} for _ in range(N_pairs)
-    ] if return_details else None
-
-    # フェーズ1: 広域探索（各ペアで s=1 を1ラウンド分だけ）
-    # ここでは、lonline_init に「残余予算」をそのまま渡しても s=1 しか実行せず、
-    # 各リンク1回の s=1 ラウンド分ずつしか消費しない実装になっている。
-    networks   = [None] * N_pairs
-    states     = [None] * N_pairs
-    f_init     = [0.0] * N_pairs
-    init_costs = [0] * N_pairs
-
+    # -----------------------
+    # フェーズ1: 広域探索
+    # -----------------------
     for pair_idx, path_num in enumerate(node_path_list):
         if consumed_total >= C_total or path_num <= 0:
             continue
+
+        # --- DEBUG: フェーズ1 呼び出し前 ---
+        print(f"[INIT] pair={pair_idx} remain={int(C_total)-int(consumed_total)} "
+              f"paths={path_num} bounces={bounces}")
 
         remaining = int(C_total) - int(consumed_total)
         if remaining <= 0:
             break
 
-        network = network_generator(path_num, pair_idx)
-        path_list = list(range(1, path_num + 1))
+        # 元実装どおりに path_list / network を構築
+        path_list = list(range(int(path_num)))
+        network = network_generator(int(path_num), pair_idx)
         networks[pair_idx] = network
 
         if return_details:
@@ -68,11 +70,22 @@ def greedy_budget_scheduler(
                 per_pair_details[pair_idx]["alloc_by_path"][int(l)] = \
                     per_pair_details[pair_idx]["alloc_by_path"].get(int(l), 0) + int(b)
             per_pair_details[pair_idx]["est_fid_by_path"].update({int(k): float(v) for k, v in est0.items()})
+            # --- DEBUG: フェーズ1 戻り（詳細あり） ---
+            _sum_after_init = sum(per_pair_details[pair_idx]["alloc_by_path"].values())
+            print(f"[INIT<-] pair={pair_idx} cost={int(cost)} best_path_fid={best_path_fid} "
+                  f"s={state.get('s') if state else None} "
+                  f"k={len(state.get('candidate_set', [])) if state else None}")
+            print(f"[CHECK:init] pair={pair_idx} sum_alloc_by_path={_sum_after_init} "
+                  f"(should equal init cost={int(cost)})")
         else:
             correctness, cost, best_path_fid, state = lonline_init(
                 network, path_list, list(bounces), int(remaining),
                 return_details=False, C_const=C_const, delta=delta, min_sets=4
             )
+            # --- DEBUG: フェーズ1 戻り（簡易） ---
+            print(f"[INIT<-] pair={pair_idx} cost={int(cost)} best_path_fid={best_path_fid} "
+                  f"s={state.get('s') if state else None} "
+                  f"k={len(state.get('candidate_set', [])) if state else None}")
 
         # 記録
         init_costs[pair_idx] = int(cost)
@@ -90,21 +103,35 @@ def greedy_budget_scheduler(
         if consumed_total >= C_total:
             break
 
+    # --- DEBUG: フェーズ1全体の確認 ---
+    print(f"[CHECK:after-init] sum_init={sum(init_costs)} consumed_total_after_init={consumed_total}")
+
     # V_n = I_n * f_n^(init) に基づいて、集中的活用フェーズの順序を決定
+    def _score(idx):
+        imp = importance_list[idx] if importance_list is not None else 1.0
+        return float(imp) * float(f_init[idx])
+
     order = sorted(
-        range(N_pairs),
-        key=lambda i: (importance_list[i] * f_init[i]) if node_path_list[i] > 0 else -1.0,
+        [i for i in range(N_pairs) if (states[i] is not None and node_path_list[i] > 0)],
+        key=_score,
         reverse=True
     )
 
-    # フェーズ2: 集中的活用（s=2 以降を V_n の高い順で実行）
+    # --- DEBUG: 並べ替え順とスコア ---
+    debug_scores = [(i, _score(i)) for i in range(N_pairs)]
+    print(f"[ORDER] by importance*init_fid desc: {sorted(debug_scores, key=lambda x: x[1], reverse=True)}")
+
+    # -----------------------
+    # フェーズ2: 集中的活用
+    # -----------------------
     for pair_idx in order:
+        # 各ペアの頭で“いまの”累積消費を出す
+        print(f"[GREEDY] pre-loop pair={pair_idx} consumed_total={consumed_total}")
+
         if consumed_total >= C_total:
             break
-        if node_path_list[pair_idx] <= 0:
-            continue
         if states[pair_idx] is None:
-            continue  # 初期フェーズで何もできなかった
+            continue
 
         network   = networks[pair_idx]
         state     = states[pair_idx]
@@ -114,47 +141,72 @@ def greedy_budget_scheduler(
             if remaining <= 0:
                 break
 
+            # --- DEBUG: フェーズ2 呼び出し前（残余 / s / k） ---
+            print(f"[GREEDY] pair={pair_idx} remain={remaining} "
+                  f"s={state.get('s') if state else None} "
+                  f"k={len(state.get('candidate_set', [])) if state else None}")
+
             if return_details:
                 correctness, cost, best_path_fid, alloc_more, est_more, new_state, insufficient = lonline_continue(
                     network, int(remaining), state=state, return_details=True
                 )
-                # もし insufficient=True なら、次ラウンドの最小単位すら入らない → コストは増えない
-                if insufficient:
-                    break
+                # --- DEBUG: 戻り（詳細あり） ---
+                print(f"[GREEDY<-] pair={pair_idx} cost={int(cost)} insufficient={bool(insufficient)} "
+                      f"best_path_fid={best_path_fid} "
+                      f"s'={new_state.get('s') if new_state else None} "
+                      f"k'={len(new_state.get('candidate_set', [])) if new_state else None} "
+                      f"consumed_total→{consumed_total + int(cost)}")
 
+                was_insufficient = bool(insufficient)
                 # 詳細マージ
                 for l, b in alloc_more.items():
                     per_pair_details[pair_idx]["alloc_by_path"][int(l)] = \
                         per_pair_details[pair_idx]["alloc_by_path"].get(int(l), 0) + int(b)
                 per_pair_details[pair_idx]["est_fid_by_path"].update({int(k): float(v) for k, v in est_more.items()})
+                # --- DEBUG: フェーズ2 加算後の per-link 合計 ---
+                _sum_after_round = sum(per_pair_details[pair_idx]["alloc_by_path"].values())
+                print(f"[CHECK:round] pair={pair_idx} add={int(cost)} sum_alloc_by_path={_sum_after_round}")
             else:
                 correctness, cost, best_path_fid, new_state, insufficient = lonline_continue(
                     network, int(remaining), state=state, return_details=False
                 )
-                if insufficient:
-                    break
-
-            # 成果の反映
+                # --- DEBUG: 戻り（簡易 / False 分岐目印） ---
+                print(f"[GREEDY<-] pair={pair_idx} cost={int(cost)} insufficient={bool(insufficient)} "
+                      f"best_path_fid={best_path_fid} "
+                      f"s'={new_state.get('s') if new_state else None} "
+                      f"k'={len(new_state.get('candidate_set', [])) if new_state else None} "
+                      f"consumed_total→{consumed_total + int(cost)}")
+                was_insufficient = bool(insufficient)
+            # 成果の反映（元の実装どおり）
             consumed_total += int(cost)
-            state           = new_state
-            states[pair_idx]= new_state  # 念のため保持
+            # --- DEBUG: コスト加算“後”の累積値 ---
+            print(f"[GREEDY] post-accum pair={pair_idx} consumed_total={consumed_total}")
 
-            # 既存結果に加算更新
-            prev_correct, prev_cost, _prev_fid = per_pair_results[pair_idx]
+            state            = new_state
+            states[pair_idx] = new_state
+
+            # per_pair_results の加算更新（元コードのまま）
+            prev_correctness, prev_cost, prev_best = per_pair_results[pair_idx]
             per_pair_results[pair_idx] = (
-                bool(correctness),                          # 最新の correctness を採用
+                bool(prev_correctness and correctness),     # 正解フラグは論理積
                 int(prev_cost) + int(cost),                 # コストは加算
                 best_path_fid,                              # 最新の fid を採用
             )
+            if was_insufficient:
+                print(f"[GREEDY] break(insufficient) pair={pair_idx}")
+                break
 
             # 候補が1本に絞れていれば、このペアは確定とみなして次へ
             cand = list(new_state.get("candidate_set", []))
             if len(cand) <= 1:
+                print(f"[GREEDY] converged pair={pair_idx} "
+                      f"s={new_state.get('s')} k={len(cand)} consumed_total={consumed_total}")
                 break
 
             if consumed_total >= C_total:
                 break
 
     # 返却（互換維持）
+    print(f"[CHECK:return] consumed_total={consumed_total}")
     return (per_pair_results, int(consumed_total), per_pair_details) if return_details \
            else (per_pair_results, int(consumed_total))

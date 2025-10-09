@@ -11,7 +11,7 @@ def run_scheduler(
     bounces,
     C_total,
     network_generator,
-    return_details=False,  
+    return_details=True,  
 ):
     if scheduler_name == "LNaive":
         return lnaive_budget_scheduler(
