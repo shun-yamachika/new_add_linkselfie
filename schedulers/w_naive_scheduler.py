@@ -1,7 +1,32 @@
 # schedulers/lnaive_scheduler.py
 from .lnaive_nb import naive_network_benchmarking_with_budget
+# 追加：重要度に比例して C_total を N ペアへ割り当てる
+def _allocate_budget_by_importance(weights, C_total: int):
+    # クリップ＆型
+    w = [max(0.0, float(x)) for x in weights]
+    W = sum(w)
+    if C_total <= 0:
+        return [0] * len(w)
+    if W <= 0.0:
+        # 全て0なら均等割
+        base = C_total // max(1, len(w))
+        rem  = C_total - base * len(w)
+        alloc = [base] * len(w)
+        for i in range(rem):
+            alloc[i] += 1
+        return alloc
 
-def lnaive_budget_scheduler(
+    # 連続値の割当 → 切り捨て → 余りを小数部の大きい順で配分
+    quotas = [C_total * wi / W for wi in w]
+    floors = [int(q) for q in quotas]
+    rem = C_total - sum(floors)
+    frac = [(q - f, idx) for idx, (q, f) in enumerate(zip(quotas, floors))]
+    frac.sort(reverse=True)  # 小数部の大きい順
+    for k in range(rem):
+        floors[frac[k][1]] += 1
+    return floors
+
+def w_naive_budget_scheduler(
     node_path_list,      # 例: [2, 2, 2] … 各ペアのパス本数
     importance_list,     # 例: [0.3, 0.5, 0.7] … 長さは node_path_list と同じ（ここでは未使用）
     bounces,             # 例: [1,2,3,4]（重複なし）
@@ -17,8 +42,8 @@ def lnaive_budget_scheduler(
     assert len(bounces) == len(set(bounces)), "bounces must be unique"
     assert all(isinstance(w, int) and w > 0 for w in bounces), "bounces must be positive ints"
 
-    # 均等配分：1ペアあたりの割当
-    C_per_pair = int(C_total // max(num_pairs, 1))
+
+    C_per_pair_list = _allocate_budget_by_importance(importance_list, int(C_total))
 
     per_pair_results = []
     per_pair_details = []
@@ -33,11 +58,12 @@ def lnaive_budget_scheduler(
 
         network = network_generator(path_num, pair_idx)
         path_list = list(range(1, path_num + 1))
+        C_pair = int(C_per_pair_list[pair_idx])  # ★追加
 
         if return_details:
             correctness, cost, best_path_fidelity, alloc_by_path, est_fid_by_path = \
                 naive_network_benchmarking_with_budget(
-                    network, path_list, list(bounces), C_per_pair, return_details=True
+                    network, path_list, list(bounces), C_pair, return_details=True
                 )
             per_pair_details.append({
                 "alloc_by_path": {int(k): int(v) for k, v in alloc_by_path.items()},
@@ -45,7 +71,7 @@ def lnaive_budget_scheduler(
             })
         else:
             correctness, cost, best_path_fidelity = naive_network_benchmarking_with_budget(
-                network, path_list, list(bounces), C_per_pair
+                network, path_list, list(bounces), C_pair
             )
 
         per_pair_results.append((bool(correctness), int(cost), best_path_fidelity))

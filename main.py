@@ -21,7 +21,7 @@ SEED        = 13
 NOISE_MODEL = "Depolar"
 BOUNCES     = (1, 2, 3, 4)
 REPEAT      = 5
-SCHEDULERS  = ["LNaive","Groups","Greedy"]
+SCHEDULERS  = ["LNaive","Groups","Greedy","WNaive"]
 
 # Importance settings
 # NOTE: "uniform" のときは *_IMPORTANCES は使われず、各リピートで U[a,b] から再サンプルされます
@@ -31,9 +31,9 @@ IMPORTANCE_UNIFORM = (0.0, 1.0)         # used only if IMPORTANCE_MODE == "unifo
 # -----------------
 # 1) Budget sweep
 # -----------------
-BUDGET_LIST         = [100, 250, 500,1000,2500]
-BUDGET_NODE_PATHS   = [5,5,5,5,5]
-BUDGET_IMPORTANCES  = [0.2,0.4,0.6,0.8,1.0]   # Budget専用: IMPORTANCE_MODE == "fixed" のときのみ使用
+BUDGET_LIST         = [50,100,200,500,1000]
+BUDGET_NODE_PATHS   = [5,5,5,5]
+BUDGET_IMPORTANCES  = [0.2,0.4,0.6,0.8]   # Budget専用: IMPORTANCE_MODE == "fixed" のときのみ使用
 
 # --------------
 # 2) Gap sweeps

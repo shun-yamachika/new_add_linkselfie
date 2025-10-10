@@ -1,7 +1,7 @@
 from .lnaive_scheduler import lnaive_budget_scheduler
 from .greedy_scheduler import greedy_budget_scheduler
 from .groups_scheduler import groups_budget_scheduler
-
+from .w_naive_scheduler import w_naive_budget_scheduler
 
 
 def run_scheduler(
@@ -28,5 +28,11 @@ def run_scheduler(
             node_path_list, importance_list, bounces, C_total, network_generator,
             return_details=return_details,   
         )
+    elif scheduler_name == "WNaive":
+        return w_naive_budget_scheduler(
+            node_path_list, importance_list, bounces, C_total, network_generator,
+            return_details=return_details,   
+        )
+
 
         raise ValueError(f"Unknown scheduler name: {scheduler_name}")
