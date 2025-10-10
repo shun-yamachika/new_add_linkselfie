@@ -22,7 +22,7 @@ def greedy_budget_scheduler(
     N_pairs = len(node_path_list)
     networks         = [None] * N_pairs
     states           = [None] * N_pairs
-    per_pair_results = [None] * N_pairs
+    per_pair_results = [(False, 0, None)] * N_pairs
     per_pair_details = [dict(alloc_by_path={}, est_fid_by_path={}) for _ in range(N_pairs)]
     init_costs       = [0] * N_pairs
     f_init           = [0.0] * N_pairs
@@ -33,7 +33,9 @@ def greedy_budget_scheduler(
     # -----------------------
     for pair_idx, path_num in enumerate(node_path_list):
         if consumed_total >= C_total or path_num <= 0:
-            continue
+             per_pair_results[pair_idx] = (False, 0, None)
+             continue
+
 
         print(f"[INIT] pair={pair_idx} remain={int(C_total)-int(consumed_total)} "
               f"paths={path_num} bounces={bounces}")

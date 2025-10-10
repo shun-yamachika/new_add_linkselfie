@@ -21,19 +21,19 @@ SEED        = 13
 NOISE_MODEL = "Depolar"
 BOUNCES     = (1, 2, 3, 4)
 REPEAT      = 5
-SCHEDULERS  = ["LNaive","Greedy","Groups"]
+SCHEDULERS  = ["LNaive","Groups","Greedy"]
 
 # Importance settings
 # NOTE: "uniform" のときは *_IMPORTANCES は使われず、各リピートで U[a,b] から再サンプルされます
-IMPORTANCE_MODE    = "uniform"          # "fixed" or "uniform"
+IMPORTANCE_MODE    = "fixed"          # "fixed" or "uniform"
 IMPORTANCE_UNIFORM = (0.0, 1.0)         # used only if IMPORTANCE_MODE == "uniform"
 
 # -----------------
 # 1) Budget sweep
 # -----------------
-BUDGET_LIST         = [500,1000]
-BUDGET_NODE_PATHS   = [4,4,4,4]
-BUDGET_IMPORTANCES  = [0.2,0.4,0.6,0.8]   # Budget専用: IMPORTANCE_MODE == "fixed" のときのみ使用
+BUDGET_LIST         = [100, 250, 500,1000,2500]
+BUDGET_NODE_PATHS   = [5,5,5,5,5]
+BUDGET_IMPORTANCES  = [0.2,0.4,0.6,0.8,1.0]   # Budget専用: IMPORTANCE_MODE == "fixed" のときのみ使用
 
 # --------------
 # 2) Gap sweeps
@@ -56,7 +56,7 @@ GAP_FIX_IMPORTANCES = [0.3, 0.6, 0.9, 0.3]    # fixed時のみ使用
 # 3) #Pairs (N) sweep
 # --------------------
 PAIRS_LIST      = [3, 4, 5, 6, 7, 8]   # number of destination pairs
-PATHS_PER_PAIR  = 4                    # candidate links per pair
+PATHS_PER_PAIR  = 8                    # candidate links per pair
 C_PAIRS_TOTAL   = 10000                # total budget per N
 
 def set_random_seed(seed: int = 12):
