@@ -419,3 +419,97 @@ def plot_value_vs_used(
     if shutil.which("pdfcrop"):
         os.system(f'pdfcrop --margins "8 8 8 8" {pdf} {pdf}')
     _log(f"Saved: {pdf}")
+
+
+def plot_value_vs_budget(
+    budget_list, scheduler_names, noise_model,
+    node_path_list, importance_list,
+    bounces=(1,2,3,4), repeat=10, importance_mode="fixed", importance_uniform=(0.0,1.0), seed=None,
+    verbose=True, print_every=1,
+):
+    """
+    x=割り当て予算（budget_list）、y=Σ_d I_d * true_fid(j*_d) の平均±95%CI を描画する。
+    ※ j*_d は「その時点の推定最大リンク」。全リンク未測定でも、推定が1本でもあればその j* を使う。
+    出力: outputs/plot_value_vs_budget_{noise_model}.pdf
+    """
+    file_name = f"plot_value_vs_budget_{noise_model}"
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    outdir = os.path.join(root_dir, "outputs")
+    os.makedirs(outdir, exist_ok=True)
+
+    # 共有スイープ（キャッシュ）を実行/読込
+    payload = _run_or_load_shared_sweep(
+        budget_list, scheduler_names, noise_model,
+        node_path_list, importance_list,
+        bounces=bounces, repeat=repeat,
+        importance_mode=importance_mode, importance_uniform=importance_uniform, seed=seed,
+        verbose=verbose, print_every=print_every,
+    )
+
+    # スケジューラごと・予算ごとに value と（参考）used コストを蓄積
+    results = {name: {"values": [[] for _ in budget_list], "costs": [[] for _ in budget_list]} for name in scheduler_names}
+
+    for name in scheduler_names:
+        for k in range(len(budget_list)):
+            for run in payload["data"][name][k]:
+                per_pair_details = run["per_pair_details"]
+                total_cost = int(run["total_cost"])  # 参考（今回はxに使わない）
+                I_used = run.get("importance_list", importance_list)
+
+                # y: value = Σ_d I_d * true_fid(j*_d)
+                # j*_d = argmax_l est_fid_by_path[d][l]（1本でも推定があればその時点のj*を採用）
+                value = 0.0
+                for d, det in enumerate(per_pair_details):
+                    est   = det.get("est_fid_by_path", {})   # {path_id(1..L): est}
+                    true_ = det.get("true_fid_by_path", {})  # {path_id(1..L): true}
+
+                    # 真値辞書が無いのは設定不整合
+                    if not true_:
+                        raise RuntimeError(f"[value] true_fid_by_path missing for pair {d}")
+
+                    # 推定が1本でもあれば、その時点の j* の『真の忠実度』を使う
+                    if est:
+                        j_star = max(est, key=lambda l: float(est.get(l, 0.0)))
+                        if j_star not in true_:
+                            raise RuntimeError(f"[value] true_fid_by_path lacks j* (pair={d}, j*={j_star}).")
+                        best_true = float(true_[j_star])
+                    else:
+                        # 推定が全く無ければ寄与0
+                        best_true = 0.0
+
+                    I = float(I_used[d]) if d < len(I_used) else 1.0
+                    value += I * best_true
+
+                results[name]["values"][k].append(float(value))
+                results[name]["costs"][k].append(total_cost)  # y軸には使わないが保持
+
+    # === プロット（x: 割り当て予算 = budget_list, y: value 平均±95%CI） ===
+    plt.rc("axes", prop_cycle=default_cycler)
+    fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
+
+    x_vals = np.asarray(list(budget_list), dtype=float)  # 横軸は割り当て予算
+
+    for name, dat in results.items():
+        # y は各予算での value の平均 ± 95%CI
+        y_means, y_halfs = [], []
+        for vals in dat["values"]:
+            m, h = mean_ci95(vals)
+            y_means.append(float(m))
+            y_halfs.append(float(h))
+
+        y_means = np.asarray(y_means)
+        y_halfs = np.asarray(y_halfs)
+
+        label = name.replace("Vanilla NB", "VanillaNB").replace("Succ. Elim. NB", "SuccElimNB")
+        ax.plot(x_vals, y_means, linewidth=2.0, marker="o", label=label)
+        ax.fill_between(x_vals, y_means - y_halfs, y_means + y_halfs, alpha=0.25)
+
+    ax.set_xlabel("Total Budget (C)")
+    ax.set_ylabel("Σ_d I_d · true_fid(j*_d) (mean ± 95% CI)")
+    ax.grid(True); ax.legend(title="Scheduler")
+
+    pdf = os.path.join(outdir, f"{file_name}.pdf")
+    plt.savefig(pdf)
+    if shutil.which("pdfcrop"):
+        os.system(f'pdfcrop --margins "8 8 8 8" {pdf} {pdf}')
+    _log(f"Saved: {pdf}")

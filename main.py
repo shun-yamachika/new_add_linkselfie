@@ -3,7 +3,7 @@ import os
 import random
 import numpy as np
 
-from evaluation import plot_accuracy_vs_budget, plot_value_vs_used
+from evaluation import plot_accuracy_vs_budget, plot_value_vs_used, plot_value_vs_budget
 from evaluationgap import plot_accuracy_vs_gap, plot_accuracy_vs_gap_fixgap
 from evaluationpair import plot_accuracy_vs_pairs
 
@@ -92,6 +92,20 @@ def main():
         )
         # 価値関数プロット（必要ならコメント解除）
         plot_value_vs_used(
+            budget_list=BUDGET_LIST,
+            scheduler_names=SCHEDULERS,
+            noise_model=NOISE_MODEL,
+            node_path_list=BUDGET_NODE_PATHS,
+            importance_list=BUDGET_IMPORTANCES,
+            bounces=BOUNCES,
+            repeat=REPEAT,
+            importance_mode=IMPORTANCE_MODE,
+            importance_uniform=IMPORTANCE_UNIFORM,
+            seed=SEED,
+            verbose=True,
+        )
+
+        plot_value_vs_budget(
             budget_list=BUDGET_LIST,
             scheduler_names=SCHEDULERS,
             noise_model=NOISE_MODEL,
