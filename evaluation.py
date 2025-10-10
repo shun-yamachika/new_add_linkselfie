@@ -370,17 +370,17 @@ def plot_value_vs_used(
                     if not true_:
                         raise RuntimeError(f"[value] true_fid_by_path missing for pair {d}")
 
-                    # 2) 全リンクを測っていない（= 推定が存在しないリンクがある）→ この宛先の寄与は0
-                    if (not est) or (len(est) < len(true_)):
-                        best_true = 0.0
-                    else:
-                        # 3) 全リンク測定済みなら、推定最大 j* の『真の忠実度』を必ず使用
+                    # 2') 1本でも推定があれば、その時点の推定最大 j* を選び、その『真の忠実度』を使う
+                    if est:
                         j_star = max(est, key=lambda l: float(est.get(l, 0.0)))
                         if j_star not in true_:
                             raise RuntimeError(
                                 f"[value] true_fid_by_path lacks j* (pair={d}, j*={j_star})."
                             )
                         best_true = float(true_[j_star])
+                    else:
+                        # 推定が全く無ければ 0 寄与（従来どおり）
+                        best_true = 0.0
 
                     I = float(I_used[d]) if d < len(I_used) else 1.0
                     value += I * best_true
