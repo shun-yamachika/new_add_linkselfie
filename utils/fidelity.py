@@ -33,7 +33,7 @@ def generate_fidelity_list_random(path_num: int, alpha: float = 0.90, beta: floa
 
 # 再現性のため：rng を使ったバージョン（← 正式名はアンダースコア付き）
 def _generate_fidelity_list_random_rng(rng: np.random.Generator, path_num: int,
-                                       alpha: float = 0.86, beta: float = 0.85, variance: float = 0.1):
+                                       alpha: float = 0.95, beta: float = 0.85, variance: float = 0.1):
     assert path_num >= 2
     while True:
         mean = [alpha] + [beta] * (path_num - 1)
@@ -46,7 +46,7 @@ def _generate_fidelity_list_random_rng(rng: np.random.Generator, path_num: int,
                     break
             res.append(float(r))
         sorted_res = sorted(res, reverse=True)
-        if sorted_res[0] - sorted_res[1] > 0.005:
+        if sorted_res[0] - sorted_res[1] > 0.02:
             return res
 
 __all__ = [

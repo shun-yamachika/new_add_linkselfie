@@ -1,4 +1,4 @@
-# === lonline_nb.py: 末尾の追記ブロック（修正版） ===
+# lonline_nb.py
 import math
 
 def _ns_for_round(s, k, C_const, delta, min_sets):
@@ -15,6 +15,7 @@ def lonline_init(
     出力:
       correctness, cost, best_path_fidelity, [alloc_by_path, est_fid_by_path,] state
     """
+    # ★ 受け取った path_list を“公開ID(=1..L)”として、そのまま使う
     candidate_set = list(path_list)
     alloc_by_path = {int(p): 0 for p in path_list}
     est_fid_by_path = {}
@@ -36,7 +37,7 @@ def lonline_init(
     s = 1
     Ns = _ns_for_round(s, len(candidate_set), C_const, delta, min_sets)
 
-    # ★ フェーズ単位の均等投入: 候補全体に Ns セットを入れられるかを事前判定
+    # 候補全リンクに一律 Ns セットを入れられるかを事前判定（途中打ち切りなしを保証）
     round_cost_all = len(candidate_set) * Ns * c_B
     if round_cost_all > C_budget:
         base = (False, 0, None)
@@ -54,7 +55,7 @@ def lonline_init(
     p_s, measured = {}, []
     for path in list(candidate_set):
         p, used = network.benchmark_path(path, bounces, sample_times)
-        cost += int(used)  # 実質的に round_cost_all と一致するはず
+        cost += int(used)
         fidelity = p + (1 - p) / 2.0
         estimated_fidelities[path] = fidelity
         p_s[path] = p
@@ -96,7 +97,7 @@ def lonline_continue(
     出力:
       correctness, cost, best_path_fidelity, [alloc_by_path, est_fid_by_path,] new_state, insufficient_budget
     """
-    # state から引き継ぎ
+    # 引き継ぎ
     s = int(state.get("s", 1))
     candidate_set = list(state.get("candidate_set", []))
     estimated_fidelities = dict(state.get("estimated_fidelities", {}))
@@ -129,17 +130,15 @@ def lonline_continue(
         s += 1
         Ns = _ns_for_round(s, len(candidate_set), C_const, delta, min_sets)
 
-        # ★ フェーズ単位の均等投入判定（候補全リンクに一律 Ns セット）
+        # 候補全リンクに一律 Ns セット（途中打ち切りなし）
         round_cost_all = len(candidate_set) * Ns * c_B
         if cost + round_cost_all > C_budget:
             insufficient_budget = True
-            s -= 1  # このフェーズは未実行
+            s -= 1
             break
 
         sample_times = {h: int(Ns) for h in bounces}
         p_s, measured = {}, []
-
-        # 候補全リンクに一律 Ns セット投入（途中打ち切りなし）
         for path in list(candidate_set):
             p, used = network.benchmark_path(path, bounces, sample_times)
             cost += int(used)
@@ -153,7 +152,6 @@ def lonline_continue(
         if not p_s:
             break
 
-        # 逐次除去（現時点では 2^{-s} 閾値ルール）
         p_max = max(p_s.values())
         new_cand = [path for path in measured if (p_s[path] + 2 ** (-s) > p_max - 2 ** (-s))]
         candidate_set = new_cand or candidate_set
@@ -175,9 +173,8 @@ def lonline_continue(
     if return_details:
         base += (alloc_by_path, est_fid_by_path)
     return (*base, new_state, insufficient_budget)
-# === 修正ここまで ===
+
 def _dry_phase_cost(state, C_budget, C_const=None, delta=None, min_sets=None):
-    import math
     s = int(state.get("s", 1))
     k = len(state.get("candidate_set", []))
     bounces = state.get("bounces", [])
@@ -185,9 +182,9 @@ def _dry_phase_cost(state, C_budget, C_const=None, delta=None, min_sets=None):
     C_const = state.get("C_const", 0.01) if C_const is None else C_const
     delta   = state.get("delta", 0.1)    if delta   is None else delta
     min_sets = state.get("min_sets", 4)  if min_sets is None else min_sets
-    def Ns(s,k): 
+    def Ns(s, k):
         val = math.ceil(C_const * (2**(2*s)) * math.log2(max((2**s)*k/delta, 2)))
         return max(val, min_sets)
-    need_s2 = k * Ns(2,k) * c_B
-    need_s3 = k * Ns(3,k) * c_B
+    need_s2 = k * Ns(2, k) * c_B
+    need_s3 = k * Ns(3, k) * c_B
     return dict(s=s, k=k, c_B=c_B, need_s2=need_s2, need_s3=need_s3, C_budget=int(C_budget))

@@ -11,9 +11,9 @@ from evaluationpair import plot_accuracy_vs_pairs
 # Simple configuration
 # =====================
 # Toggle which experiments to run
-RUN_BUDGET     = False   
+RUN_BUDGET     = True
 RUN_GAP_RANDOM = False   
-RUN_GAP_FIX    = True
+RUN_GAP_FIX    = False
 RUN_PAIRS      = False
 
 # Global seed + common settings
@@ -21,7 +21,7 @@ SEED        = 13
 NOISE_MODEL = "Depolar"
 BOUNCES     = (1, 2, 3, 4)
 REPEAT      = 5
-SCHEDULERS  = ["LNaive","Greedy"]
+SCHEDULERS  = ["LNaive","Greedy","Groups"]
 
 # Importance settings
 # NOTE: "uniform" のときは *_IMPORTANCES は使われず、各リピートで U[a,b] から再サンプルされます
@@ -31,9 +31,9 @@ IMPORTANCE_UNIFORM = (0.0, 1.0)         # used only if IMPORTANCE_MODE == "unifo
 # -----------------
 # 1) Budget sweep
 # -----------------
-BUDGET_LIST         = [4000]
-BUDGET_NODE_PATHS   = [4,4,4,4,4,4,4,4,4,4]         
-BUDGET_IMPORTANCES  = [1,1,1,1,1,1,1,1,1,0.1]   # Budget専用: IMPORTANCE_MODE == "fixed" のときのみ使用
+BUDGET_LIST         = [500,1000]
+BUDGET_NODE_PATHS   = [4,4,4,4]
+BUDGET_IMPORTANCES  = [0.2,0.4,0.6,0.8]   # Budget専用: IMPORTANCE_MODE == "fixed" のときのみ使用
 
 # --------------
 # 2) Gap sweeps
