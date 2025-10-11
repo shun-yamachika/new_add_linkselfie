@@ -233,6 +233,7 @@ def _run_or_load_pair_sweep(
 # =========================
 # Plot: Accuracy (mean ± 95% CI) vs #Destination Pairs
 # =========================
+
 def plot_accuracy_vs_pairs(
     pairs_list, paths_per_pair, C_total, scheduler_names, noise_model,
     bounces=(1,2,3,4), repeat=10,
@@ -337,3 +338,83 @@ if __name__ == "__main__":
         importance_mode=importance_mode, importance_uniform=importance_uniform,
         seed=seed, verbose=True
     )
+
+
+def plot_value_vs_pairs(
+    pairs_list, paths_per_pair, C_total, scheduler_names, noise_model,
+    bounces=(1,2,3,4), repeat=10,
+    importance_mode="fixed", importance_uniform=(0.0,1.0),
+    seed=None,
+    verbose=True, print_every=1,
+):
+    """
+    #Pairs（x軸）に対して、価値 y = Σ_d I_d * true_fid(j*_d)（平均±95%CI）を描画。
+    出力: outputs/plot_value_vs_pairs_{noise_model}.pdf
+    """
+    file_name = f"plot_value_vs_pairs_{noise_model}"
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    outdir = os.path.join(root_dir, "outputs")
+    os.makedirs(outdir, exist_ok=True)
+
+    payload = _run_or_load_pair_sweep(
+        pairs_list, paths_per_pair, C_total, scheduler_names, noise_model,
+        bounces=bounces, repeat=repeat,
+        importance_mode=importance_mode, importance_uniform=importance_uniform,
+        seed=seed, verbose=verbose, print_every=print_every
+    )
+
+    # 収集：各 N・各スケジューラについて value の配列を溜める
+    results = {name: {"values": [[] for _ in pairs_list]} for name in scheduler_names}
+
+    for name in scheduler_names:
+        for k in range(len(pairs_list)):
+            for run in payload["data"][name][k]:
+                per_pair_details = run["per_pair_details"]
+                I_used = run.get("importance_list", [1.0] * pairs_list[k])
+
+                value = 0.0
+                for d, det in enumerate(per_pair_details):
+                    est   = det.get("est_fid_by_path", {})
+                    true_ = det.get("true_fid_by_path", {})
+                    if not true_:
+                        raise RuntimeError(f"[value-pairs] true_fid_by_path missing for pair {d}")
+                    if est:
+                        j_star = max(est, key=lambda l: float(est.get(l, 0.0)))
+                        if j_star not in true_:
+                            raise RuntimeError(f"[value-pairs] true map lacks j* (pair={d}, j*={j_star})")
+                        best_true = float(true_[j_star])
+                    else:
+                        best_true = 0.0
+                    I = float(I_used[d]) if d < len(I_used) else 1.0
+                    value += I * best_true
+
+                results[name]["values"][k].append(float(value))
+
+    # Plot
+    import numpy as np
+    import matplotlib.pyplot as plt
+    plt.rc("axes", prop_cycle=_default_cycler)
+    fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
+    xs = list(pairs_list)
+
+    for name, data in results.items():
+        y_means, y_halfs = [], []
+        for vals in data["values"]:
+            m, h = mean_ci95(vals)
+            y_means.append(m); y_halfs.append(h)
+        y_means = np.asarray(y_means); y_halfs = np.asarray(y_halfs)
+
+        label = name.replace("Vanilla NB","VanillaNB").replace("Succ. Elim. NB","SuccElimNB")
+        ax.plot(xs, y_means, linewidth=2.0, marker="o", label=label)
+        ax.fill_between(xs, y_means - y_halfs, y_means + y_halfs, alpha=0.25)
+
+    ax.set_xlabel("Number of Destination Pairs (N)")
+    ax.set_ylabel("Σ_d I_d · true_fid(j*_d) (平均 ± 95%CI)")
+    ax.grid(True); ax.legend(title="Scheduler", fontsize=14, title_fontsize=18)
+
+    pdf = os.path.join(outdir, f"{file_name}.pdf")
+    plt.savefig(pdf)
+    if shutil.which("pdfcrop"):
+        os.system(f'pdfcrop --margins "8 8 8 8" "{pdf}" "{pdf}"')
+    print(f"Saved: {pdf}", flush=True)
+    return {"pdf": pdf, "pairs_list": list(pairs_list)}

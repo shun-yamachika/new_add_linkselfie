@@ -265,6 +265,7 @@ def _run_or_load_shared_gap_sweep(
 # -----------------------------
 # Public APIs
 # -----------------------------
+
 def plot_accuracy_vs_gap(
     gap_list: Sequence[float], scheduler_names: Sequence[str], noise_model: str,
     node_path_list: Sequence[int], importance_list: Sequence[float],
@@ -339,7 +340,7 @@ def plot_accuracy_vs_gap(
     print(f"Saved: {pdf}", flush=True)
     return pdf
 
-
+
 def plot_accuracy_vs_gap_fixgap(
     gap_list: Sequence[float], scheduler_names: Sequence[str], noise_model: str,
     node_path_list: Sequence[int], importance_list: Sequence[float],
@@ -411,6 +412,180 @@ def plot_accuracy_vs_gap_fixgap(
     ax.set_ylabel("Average Correctness (mean ± 95% CI)")
     ax.grid(True)
     ax.legend(title="Scheduler", fontsize=14, title_fontsize=18)
+
+    pdf = os.path.join(outdir, f"{file_name}.pdf")
+    plt.savefig(pdf)
+    if shutil.which("pdfcrop"):
+        os.system(f'pdfcrop --margins "8 8 8 8" "{pdf}" "{pdf}"')
+    print(f"Saved: {pdf}", flush=True)
+    return pdf
+
+
+def plot_value_vs_gap(
+    gap_list, scheduler_names, noise_model,
+    node_path_list, importance_list,
+    bounces=(1, 2, 3, 4), repeat: int = 10,
+    importance_mode: str = "fixed", importance_uniform=(0.0, 1.0),
+    seed: int = None, alpha_base: float = 0.95, variance: float = 0.10,
+    C_total_override: int = None,
+    verbose: bool = True, print_every: int = 1,
+) -> str:
+    """
+    Gap（x軸）に対して、価値 y = Σ_d I_d * true_fid(j*_d)（平均±95%CI）を描画（random mode）。
+    j*_d は「推定忠実度が最大のリンク」（推定が1本でもあればその時点の最大）とする。
+    出力: outputs/plot_value_vs_gap_random_{noise_model}.pdf
+    """
+    file_name = f"plot_value_vs_gap_random_{noise_model}"
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    outdir = os.path.join(root_dir, "outputs")
+    os.makedirs(outdir, exist_ok=True)
+
+    C_total = int(C_total_override) if C_total_override is not None else 5000
+
+    payload = _run_or_load_shared_gap_sweep(
+        gap_list, scheduler_names, noise_model,
+        node_path_list, importance_list,
+        bounces=bounces, repeat=repeat,
+        importance_mode=importance_mode, importance_uniform=importance_uniform,
+        seed=seed, alpha_base=alpha_base, variance=variance,
+        C_total=C_total, mode="random",
+        verbose=verbose, print_every=print_every,
+    )
+
+    # 収集：各 gap・各スケジューラについて value の配列を溜める
+    results = {name: {"values": [[] for _ in gap_list]} for name in scheduler_names}
+
+    for name in scheduler_names:
+        for k in range(len(gap_list)):
+            for run in payload["data"][name][k]:
+                per_pair_details = run["per_pair_details"]
+                I_used = run.get("importance_list", importance_list)
+
+                value = 0.0
+                for d, det in enumerate(per_pair_details):
+                    est   = det.get("est_fid_by_path", {})
+                    true_ = det.get("true_fid_by_path", {})
+                    if not true_:
+                        raise RuntimeError(f"[value-gap] true_fid_by_path missing for pair {d}")
+                    if est:
+                        j_star = max(est, key=lambda l: float(est.get(l, 0.0)))
+                        if j_star not in true_:
+                            raise RuntimeError(f"[value-gap] true map lacks j* (pair={d}, j*={j_star})")
+                        best_true = float(true_[j_star])
+                    else:
+                        best_true = 0.0
+                    I = float(I_used[d]) if d < len(I_used) else 1.0
+                    value += I * best_true
+
+                results[name]["values"][k].append(float(value))
+
+    # Plot
+    import numpy as np
+    import matplotlib.pyplot as plt
+    plt.rc("axes", prop_cycle=_default_cycler)
+    fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
+    xs = list(map(float, gap_list))
+
+    for name, data in results.items():
+        y_means, y_halfs = [], []
+        for vals in data["values"]:
+            m, h = mean_ci95(vals)
+            y_means.append(m); y_halfs.append(h)
+        y_means = np.asarray(y_means); y_halfs = np.asarray(y_halfs)
+
+        label = name.replace("Vanilla NB","VanillaNB").replace("Succ. Elim. NB","SuccElimNB")
+        ax.plot(xs, y_means, linewidth=2.0, marker="o", label=label)
+        ax.fill_between(xs, y_means - y_halfs, y_means + y_halfs, alpha=0.25)
+
+    ax.set_xlabel("Gap (alpha - beta)")
+    ax.set_ylabel("Σ_d I_d · true_fid(j*_d) (平均 ± 95%CI)")
+    ax.grid(True); ax.legend(title="Scheduler", fontsize=14, title_fontsize=18)
+
+    pdf = os.path.join(outdir, f"{file_name}.pdf")
+    plt.savefig(pdf)
+    if shutil.which("pdfcrop"):
+        os.system(f'pdfcrop --margins "8 8 8 8" "{pdf}" "{pdf}"')
+    print(f"Saved: {pdf}", flush=True)
+    return pdf
+
+
+def plot_value_vs_gap_fixgap(
+    gap_list, scheduler_names, noise_model,
+    node_path_list, importance_list,
+    bounces=(1, 2, 3, 4), repeat: int = 10,
+    importance_mode: str = "fixed", importance_uniform=(0.0, 1.0),
+    seed: int = None, fidelity_max: float = 1.0,
+    C_total_override: int = None,
+    verbose: bool = True, print_every: int = 1,
+) -> str:
+    """
+    Gap（x軸）に対して、価値 y = Σ_d I_d * true_fid(j*_d)（平均±95%CI）を描画（fixed arithmetic sequence mode）。
+    出力: outputs/plot_value_vs_gap_fixed_{noise_model}.pdf
+    """
+    file_name = f"plot_value_vs_gap_fixed_{noise_model}"
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    outdir = os.path.join(root_dir, "outputs")
+    os.makedirs(outdir, exist_ok=True)
+
+    C_total = int(C_total_override) if C_total_override is not None else 5000
+
+    payload = _run_or_load_shared_gap_sweep(
+        gap_list, scheduler_names, noise_model,
+        node_path_list, importance_list,
+        bounces=bounces, repeat=repeat,
+        importance_mode=importance_mode, importance_uniform=importance_uniform,
+        seed=seed, alpha_base=0.95, variance=0.10,   # fixedでは未使用。署名整合のため
+        C_total=C_total, mode="fixed",
+        verbose=verbose, print_every=print_every,
+    )
+
+    results = {name: {"values": [[] for _ in gap_list]} for name in scheduler_names}
+
+    for name in scheduler_names:
+        for k in range(len(gap_list)):
+            for run in payload["data"][name][k]:
+                per_pair_details = run["per_pair_details"]
+                I_used = run.get("importance_list", importance_list)
+
+                value = 0.0
+                for d, det in enumerate(per_pair_details):
+                    est   = det.get("est_fid_by_path", {})
+                    true_ = det.get("true_fid_by_path", {})
+                    if not true_:
+                        raise RuntimeError(f"[value-gap-fix] true_fid_by_path missing for pair {d}")
+                    if est:
+                        j_star = max(est, key=lambda l: float(est.get(l, 0.0)))
+                        if j_star not in true_:
+                            raise RuntimeError(f"[value-gap-fix] true map lacks j* (pair={d}, j*={j_star})")
+                        best_true = float(true_[j_star])
+                    else:
+                        best_true = 0.0
+                    I = float(I_used[d]) if d < len(I_used) else 1.0
+                    value += I * best_true
+
+                results[name]["values"][k].append(float(value))
+
+    # Plot
+    import numpy as np
+    import matplotlib.pyplot as plt
+    plt.rc("axes", prop_cycle=_default_cycler)
+    fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
+    xs = list(map(float, gap_list))
+
+    for name, data in results.items():
+        y_means, y_halfs = [], []
+        for vals in data["values"]:
+            m, h = mean_ci95(vals)
+            y_means.append(m); y_halfs.append(h)
+        y_means = np.asarray(y_means); y_halfs = np.asarray(y_halfs)
+
+        label = name.replace("Vanilla NB","VanillaNB").replace("Succ. Elim. NB","SuccElimNB")
+        ax.plot(xs, y_means, linewidth=2.0, marker="o", label=label)
+        ax.fill_between(xs, y_means - y_halfs, y_means + y_halfs, alpha=0.25)
+
+    ax.set_xlabel("Gap (arithmetic sequence)")
+    ax.set_ylabel("Σ_d I_d · true_fid(j*_d) (平均 ± 95%CI)")
+    ax.grid(True); ax.legend(title="Scheduler", fontsize=14, title_fontsize=18)
 
     pdf = os.path.join(outdir, f"{file_name}.pdf")
     plt.savefig(pdf)
