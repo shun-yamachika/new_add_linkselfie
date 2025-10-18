@@ -43,7 +43,7 @@ def main(src_path, out_dir=None):
     src = Path(src_path)
     if not src.exists(): raise FileNotFoundError(src)
     base_dir = Path(__file__).parent
-    out_dir = Path(out_dir) if out_dir else (base_dir / "outputs")
+    out_dir = Path(out_dir) if out_dir else (base_dir / "outpickle")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     with src.open("rb") as f: obj = pickle.load(f)

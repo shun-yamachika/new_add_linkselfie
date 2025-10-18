@@ -12,11 +12,14 @@ __pycache__/
 *.swo
 
 # Outputs and cache
-outputs/*.pickle
-outputs/*.pickle.lock
-outputs/*.pdf
-outputs/*.json
-outputs/*.ndjson
+outpdf/
+outpickle/
+outputs/
+
+# Keep README files in output directories if needed
+!outpdf/README.md
+!outpickle/README.md
+!outputs/README.md
 
 # Jupyter
 .ipynb_checkpoints
@@ -33,6 +36,3 @@ Thumbs.db
 
 # Org mode backups
 *.org~
-
-# Keep README in outputs if needed
-!outputs/README.md

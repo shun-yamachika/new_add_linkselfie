@@ -24,7 +24,7 @@ The `main.py` file controls which experiments run via flags at the top:
 - `RUN_GAP_FIX`: Gap sweep with fixed arithmetic sequences
 - `RUN_PAIRS`: Number of destination pairs sweep
 
-Results are cached in `outputs/` as pickle files with file locking for parallel execution safety.
+Results are cached in `outpickle/` as pickle files, and plots are saved to `outpdf/` as PDF files. File locking is used for parallel execution safety.
 
 ## Architecture
 
@@ -121,16 +121,26 @@ Edit configuration sections in `main.py`:
 
 ## Output Files
 
-All outputs are in `outputs/`:
-- `shared_sweep_<NoiseModel>_<hash>.pickle`: Cached experimental data
-- `pair_sweep_<NoiseModel>_<hash>.pickle`: Pairs experiment cache
+**PDF Plots** (`outpdf/`):
 - `plot_accuracy_vs_budget_<NoiseModel>.pdf`: Correctness vs budget plots
+- `plot_accuracy_vs_gap_random_<NoiseModel>.pdf`: Correctness vs gap (randomized)
+- `plot_accuracy_vs_gap_fixed_<NoiseModel>.pdf`: Correctness vs gap (fixed)
+- `plot_accuracy_vs_pairs_<NoiseModel>.pdf`: Correctness vs number of pairs
 - `plot_value_vs_budget_<NoiseModel>.pdf`: Value (weighted fidelity) vs budget
 - `plot_value_vs_used_<NoiseModel>.pdf`: Value vs actual consumed budget
+- `plot_value_vs_gap_random_<NoiseModel>.pdf`: Value vs gap (randomized)
+- `plot_value_vs_gap_fixed_<NoiseModel>.pdf`: Value vs gap (fixed)
+- `plot_value_vs_pairs_<NoiseModel>.pdf`: Value vs number of pairs
 - PDFs are auto-cropped if `pdfcrop` is available
-- `.pickle.lock` files are temporary lock files created during parallel execution
 
-**Note**: Output files are gitignored to avoid repository bloat. Cache files are reproducible via the `seed` parameter.
+**Pickle Cache** (`outpickle/`):
+- `shared_sweep_<NoiseModel>_<hash>.pickle`: Budget sweep experimental data
+- `shared_gap_<NoiseModel>_<hash>.pickle`: Gap sweep experimental data
+- `pair_sweep_<NoiseModel>_<hash>.pickle`: Pairs sweep experimental data
+- `.pickle.lock` files are temporary lock files created during parallel execution
+- Hash is MD5 of experiment configuration for reproducibility
+
+**Note**: Output directories (`outpdf/`, `outpickle/`, `outputs/`) are gitignored to avoid repository bloat. Cache files are reproducible via the `seed` parameter.
 
 ## Important Notes
 
@@ -150,11 +160,12 @@ All outputs are in `outputs/`:
 **Gitignored**:
 - Backup files (`*~`, `*.bak`)
 - Python cache (`__pycache__/`, `*.pyc`)
-- Output files (`outputs/*.pickle`, `outputs/*.pdf`, `outputs/*.json`)
+- Output directories (`outpdf/`, `outpickle/`, `outputs/`)
 - IDE settings (`.vscode/`, `.idea/`)
 
 **Utility Scripts**:
 - `convert.py`: Convert pickle cache files to JSON format for inspection
   ```bash
-  python convert.py outputs/shared_sweep_Depolar_<hash>.pickle
+  python convert.py outpickle/shared_sweep_Depolar_<hash>.pickle
   ```
+  Output JSON files are saved to the same directory as the input pickle file.

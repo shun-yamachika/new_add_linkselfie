@@ -1,7 +1,7 @@
 # evaluationpair.py — Sweep "number of destination pairs" (x) vs Accuracy (y)
 # Designed to align with evaluation.py pipeline (1-origin keys, utils.ids normalization).
 #
-# Produces: outputs/plot_accuracy_vs_pairs_<noise_model>.pdf
+# Produces: outpdf/plot_accuracy_vs_pairs_<noise_model>.pdf
 
 import os
 import time
@@ -94,7 +94,7 @@ def _sweep_signature_pairs(pairs_list, paths_per_pair, C_total, scheduler_names,
 
 def _shared_pair_sweep_path(noise_model: str, sig: str):
     root_dir = os.path.dirname(os.path.abspath(__file__))
-    outdir = os.path.join(root_dir, "outputs")
+    outdir = os.path.join(root_dir, "outpickle")
     os.makedirs(outdir, exist_ok=True)
     return os.path.join(outdir, f"pair_sweep_{noise_model}_{sig}.pickle")
 
@@ -255,7 +255,7 @@ def plot_accuracy_vs_pairs(
     """
     file_name = f"plot_accuracy_vs_pairs_{noise_model}"
     root_dir = os.path.dirname(os.path.abspath(__file__))
-    outdir = os.path.join(root_dir, "outputs")
+    outdir = os.path.join(root_dir, "outpdf")
     os.makedirs(outdir, exist_ok=True)
 
     payload = _run_or_load_pair_sweep(
@@ -349,11 +349,11 @@ def plot_value_vs_pairs(
 ):
     """
     #Pairs（x軸）に対して、価値 y = Σ_d I_d * true_fid(j*_d)（平均±95%CI）を描画。
-    出力: outputs/plot_value_vs_pairs_{noise_model}.pdf
+    出力: outpdf/plot_value_vs_pairs_{noise_model}.pdf
     """
     file_name = f"plot_value_vs_pairs_{noise_model}"
     root_dir = os.path.dirname(os.path.abspath(__file__))
-    outdir = os.path.join(root_dir, "outputs")
+    outdir = os.path.join(root_dir, "outpdf")
     os.makedirs(outdir, exist_ok=True)
 
     payload = _run_or_load_pair_sweep(

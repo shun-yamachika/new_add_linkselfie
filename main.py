@@ -232,7 +232,8 @@ def run_for_noise_model(noise_model: str):
 
 def main():
     set_random_seed(SEED)
-    os.makedirs("outputs", exist_ok=True)
+    os.makedirs("outpdf", exist_ok=True)
+    os.makedirs("outpickle", exist_ok=True)
     for nm in NOISE_MODELS:
         print(f"\n===== Run experiments for noise model: {nm} =====", flush=True)
         run_for_noise_model(nm)

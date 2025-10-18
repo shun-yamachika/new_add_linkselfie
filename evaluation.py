@@ -97,7 +97,7 @@ def _sweep_signature(budget_list, scheduler_names, noise_model,
 
 def _shared_sweep_path(noise_model, sig):
     root_dir = os.path.dirname(os.path.abspath(__file__))
-    outdir = os.path.join(root_dir, "outputs")
+    outdir = os.path.join(root_dir, "outpickle")
     os.makedirs(outdir, exist_ok=True)
     return os.path.join(outdir, f"shared_sweep_{noise_model}_{sig}.pickle")
 
@@ -267,7 +267,7 @@ def plot_accuracy_vs_budget(
 ):
     file_name = f"plot_accuracy_vs_budget_{noise_model}"
     root_dir = os.path.dirname(os.path.abspath(__file__))
-    outdir = os.path.join(root_dir, "outputs")
+    outdir = os.path.join(root_dir, "outpdf")
     os.makedirs(outdir, exist_ok=True)
 
     payload = _run_or_load_shared_sweep(
@@ -339,7 +339,7 @@ def plot_value_vs_used(
 ):
     file_name = f"plot_value_vs_used_{noise_model}"
     root_dir = os.path.dirname(os.path.abspath(__file__))
-    outdir = os.path.join(root_dir, "outputs")
+    outdir = os.path.join(root_dir, "outpdf")
     os.makedirs(outdir, exist_ok=True)
 
     payload = _run_or_load_shared_sweep(
@@ -430,11 +430,11 @@ def plot_value_vs_budget(
     """
     x=割り当て予算（budget_list）、y=Σ_d I_d * true_fid(j*_d) の平均±95%CI を描画する。
     ※ j*_d は「その時点の推定最大リンク」。全リンク未測定でも、推定が1本でもあればその j* を使う。
-    出力: outputs/plot_value_vs_budget_{noise_model}.pdf
+    出力: outpdf/plot_value_vs_budget_{noise_model}.pdf
     """
     file_name = f"plot_value_vs_budget_{noise_model}"
     root_dir = os.path.dirname(os.path.abspath(__file__))
-    outdir = os.path.join(root_dir, "outputs")
+    outdir = os.path.join(root_dir, "outpdf")
     os.makedirs(outdir, exist_ok=True)
 
     # 共有スイープ（キャッシュ）を実行/読込

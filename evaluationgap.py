@@ -81,7 +81,7 @@ def _gap_sweep_signature(gap_list: Sequence[float], scheduler_names: Sequence[st
 
 def _shared_gap_path(noise_model: str, sig: str) -> str:
     root_dir = os.path.dirname(os.path.abspath(__file__))
-    outdir = os.path.join(root_dir, "outputs")
+    outdir = os.path.join(root_dir, "outpickle")
     os.makedirs(outdir, exist_ok=True)
     return os.path.join(outdir, f"shared_gap_{noise_model}_{sig}.pickle")
 
@@ -280,7 +280,7 @@ def plot_accuracy_vs_gap(
     """
     file_name = f"plot_accuracy_vs_gap_random_{noise_model}"
     root_dir = os.path.dirname(os.path.abspath(__file__))
-    outdir = os.path.join(root_dir, "outputs")
+    outdir = os.path.join(root_dir, "outpdf")
     os.makedirs(outdir, exist_ok=True)
 
     C_total = int(C_total_override) if C_total_override is not None else 5000
@@ -356,7 +356,7 @@ def plot_accuracy_vs_gap_fixgap(
     # 固定列では rng は使わないが、署名の再現性のため seed を渡しておく
     file_name = f"plot_accuracy_vs_gap_fixed_{noise_model}"
     root_dir = os.path.dirname(os.path.abspath(__file__))
-    outdir = os.path.join(root_dir, "outputs")
+    outdir = os.path.join(root_dir, "outpdf")
     os.makedirs(outdir, exist_ok=True)
 
     # alpha_base/variance は未使用だが、シグネチャ整合のためデフォルト値を渡す
@@ -433,11 +433,11 @@ def plot_value_vs_gap(
     """
     Gap（x軸）に対して、価値 y = Σ_d I_d * true_fid(j*_d)（平均±95%CI）を描画（random mode）。
     j*_d は「推定忠実度が最大のリンク」（推定が1本でもあればその時点の最大）とする。
-    出力: outputs/plot_value_vs_gap_random_{noise_model}.pdf
+    出力: outpdf/plot_value_vs_gap_random_{noise_model}.pdf
     """
     file_name = f"plot_value_vs_gap_random_{noise_model}"
     root_dir = os.path.dirname(os.path.abspath(__file__))
-    outdir = os.path.join(root_dir, "outputs")
+    outdir = os.path.join(root_dir, "outpdf")
     os.makedirs(outdir, exist_ok=True)
 
     C_total = int(C_total_override) if C_total_override is not None else 5000
@@ -520,11 +520,11 @@ def plot_value_vs_gap_fixgap(
 ) -> str:
     """
     Gap（x軸）に対して、価値 y = Σ_d I_d * true_fid(j*_d)（平均±95%CI）を描画（fixed arithmetic sequence mode）。
-    出力: outputs/plot_value_vs_gap_fixed_{noise_model}.pdf
+    出力: outpdf/plot_value_vs_gap_fixed_{noise_model}.pdf
     """
     file_name = f"plot_value_vs_gap_fixed_{noise_model}"
     root_dir = os.path.dirname(os.path.abspath(__file__))
-    outdir = os.path.join(root_dir, "outputs")
+    outdir = os.path.join(root_dir, "outpdf")
     os.makedirs(outdir, exist_ok=True)
 
     C_total = int(C_total_override) if C_total_override is not None else 5000
