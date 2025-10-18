@@ -23,7 +23,7 @@ from evaluationpair import (
 # Simple configuration
 # =====================
 # Toggle which experiments to run
-RUN_BUDGET     = True
+RUN_BUDGET     = False
 RUN_GAP_RANDOM = False
 RUN_GAP_FIX    = False
 RUN_PAIRS      = True
@@ -44,7 +44,7 @@ IMPORTANCE_UNIFORM = (0.0, 1.0)       # used only if IMPORTANCE_MODE == "uniform
 # 1) Budget sweep
 # -----------------
 BUDGET_LIST         = [500, 1000, 1500, 2000, 2500, 3000]
-BUDGET_NODE_PATHS   = [15, 15, 15, 15]
+BUDGET_NODE_PATHS   = [4,4,4,4]
 BUDGET_IMPORTANCES  = [0.2,0.4,0.6,0.8]   # IMPORTANCE_MODE == "fixed" のときのみ使用
 
 # --------------
@@ -67,8 +67,8 @@ GAP_FIX_IMPORTANCES = [0.1,0.3,0.5,0.7,0.9]    # fixed時のみ使用
 # --------------------
 # 3) #Pairs (N) sweep
 # --------------------
-PAIRS_LIST      = [3, 5, 7, 9, 11, 13]   # number of destination pairs
-PATHS_PER_PAIR  = 5                    # candidate links per pair
+PAIRS_LIST      = [3, 5, 7, 9, 11, 13, 15, 17, 19, 21]   # number of destination pairs
+PATHS_PER_PAIR  = 4                    # candidate links per pair
 C_PAIRS_TOTAL   = 3000                # total budget per N
 
 def set_random_seed(seed: int = 12):
